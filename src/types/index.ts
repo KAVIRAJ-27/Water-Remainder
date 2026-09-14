@@ -26,6 +26,7 @@ export interface ReminderItem {
   time: string; // e.g. "08:00 AM"
   amountMl: number;
   isEnabled: boolean;
+  notificationId?: string | null;
 }
 
 export interface DailyHistoryRecord {

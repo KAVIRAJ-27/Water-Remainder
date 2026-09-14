@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
   TouchableWithoutFeedback,
   KeyboardAvoidingView,
   Platform,
+  Linking,
 } from 'react-native';
 import { useTheme } from '../../hooks/useTheme';
 import { useUserStore } from '../../store/userStore';
@@ -22,6 +23,7 @@ import { BorderRadius, Shadows, Spacing } from '../../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { ThemeMode, UnitPreference } from '../../types';
 import { useRouter } from 'expo-router';
+import { notificationService } from '../../services/notificationService';
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -47,11 +49,20 @@ export default function SettingsScreen() {
     defaultAmountMl,
     notificationsEnabled,
     soundEnabled,
+    vibrationEnabled,
     snoozeMinutes,
     updateIntervalSettings,
     updateNotificationSettings,
     resetSchedule,
   } = useReminderStore();
+
+  const [systemPermissionGranted, setSystemPermissionGranted] = useState(true);
+
+  useEffect(() => {
+    notificationService.getPermissionStatus().then((status) => {
+      setSystemPermissionGranted(status === 'granted');
+    });
+  }, []);
 
   // Edit Goal Modal State
   const [goalModalVisible, setGoalModalVisible] = useState(false);
@@ -256,6 +267,35 @@ export default function SettingsScreen() {
           <Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>
             NOTIFICATIONS
           </Text>
+
+          {!systemPermissionGranted && notificationsEnabled && (
+            <View
+              style={[
+                styles.permissionNotice,
+                {
+                  backgroundColor: colors.warning + '18',
+                  borderColor: colors.warning + '55',
+                },
+              ]}
+            >
+              <Ionicons name="alert-circle-outline" size={22} color={colors.warning} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.permissionNoticeTitle, { color: colors.warning }]}>
+                  Notifications are disabled in Android settings.
+                </Text>
+                <Text style={[styles.permissionNoticeBody, { color: colors.textSecondary }]}>
+                  Enable notifications to receive scheduled water alerts on your device.
+                </Text>
+                <TouchableOpacity
+                  style={[styles.openSettingsBtn, { backgroundColor: colors.warning }]}
+                  onPress={() => Linking.openSettings()}
+                >
+                  <Text style={styles.openSettingsBtnText}>Open Notification Settings</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
           <View
             style={[
               styles.sectionCard,
@@ -282,6 +322,15 @@ export default function SettingsScreen() {
             />
 
             <SettingRow
+              icon="radio-outline"
+              title="Vibration"
+              subtitle="Haptic pulse on alert"
+              isSwitch
+              switchValue={vibrationEnabled}
+              onSwitchChange={(val) => updateNotificationSettings({ vibrationEnabled: val })}
+            />
+
+            <SettingRow
               icon="hourglass-outline"
               title="Snooze"
               subtitle="Delay reminder duration"
@@ -294,7 +343,60 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        {/* 4. APPEARANCE SECTION */}
+        {/* 4. BATTERY OPTIMIZATION & RELIABILITY */}
+        <View style={styles.sectionWrap}>
+          <Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>
+            BATTERY OPTIMIZATION & RELIABILITY
+          </Text>
+          <View
+            style={[
+              styles.sectionCard,
+              { backgroundColor: colors.card, borderColor: colors.border, padding: Spacing.md },
+              Shadows.sm,
+            ]}
+          >
+            <View style={styles.batteryHelpHeader}>
+              <Ionicons name="battery-charging-outline" size={20} color={colors.primary} />
+              <Text style={[styles.batteryHelpTitle, { color: colors.text }]}>
+                Ensure Timely Notifications
+              </Text>
+            </View>
+            <Text style={[styles.batteryHelpText, { color: colors.textSecondary }]}>
+              Some Android manufacturers (e.g. Samsung, Xiaomi, OnePlus) aggressively restrict background tasks, which can delay or block scheduled reminders.
+            </Text>
+            <View style={styles.batteryTipList}>
+              <View style={styles.batteryTipRow}>
+                <Ionicons name="checkmark-circle" size={16} color={colors.success} />
+                <Text style={[styles.batteryTipText, { color: colors.text }]}>
+                  {'Set battery usage to "Unrestricted" in App Info.'}
+                </Text>
+              </View>
+              <View style={styles.batteryTipRow}>
+                <Ionicons name="checkmark-circle" size={16} color={colors.success} />
+                <Text style={[styles.batteryTipText, { color: colors.text }]}>
+                  Allow background activity for HydroReminder.
+                </Text>
+              </View>
+              <View style={styles.batteryTipRow}>
+                <Ionicons name="checkmark-circle" size={16} color={colors.success} />
+                <Text style={[styles.batteryTipText, { color: colors.text }]}>
+                  Exclude HydroReminder from battery savers.
+                </Text>
+              </View>
+            </View>
+            <TouchableOpacity
+              style={[styles.batterySettingsButton, { borderColor: colors.primary }]}
+              onPress={() => Linking.openSettings()}
+            >
+              <Ionicons name="settings-outline" size={15} color={colors.primary} />
+              <Text style={[styles.batterySettingsButtonText, { color: colors.primary }]}>
+                Check Android App Settings
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* 5. APPEARANCE SECTION */}
         <View style={styles.sectionWrap}>
           <Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>
             APPEARANCE
@@ -709,6 +811,78 @@ const styles = StyleSheet.create({
   },
   intervalOptionText: {
     fontSize: 14,
+    fontWeight: '700',
+  },
+  permissionNotice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.sm,
+    padding: Spacing.md,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    marginBottom: 6,
+  },
+  permissionNoticeTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  permissionNoticeBody: {
+    fontSize: 12,
+    lineHeight: 16,
+    marginBottom: Spacing.sm,
+  },
+  openSettingsBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: BorderRadius.sm,
+    alignSelf: 'flex-start',
+  },
+  openSettingsBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  batteryHelpHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+  },
+  batteryHelpTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  batteryHelpText: {
+    fontSize: 12,
+    lineHeight: 17,
+    marginBottom: Spacing.sm,
+  },
+  batteryTipList: {
+    gap: 6,
+    marginBottom: Spacing.md,
+  },
+  batteryTipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  batteryTipText: {
+    fontSize: 12,
+    fontWeight: '500',
+    flex: 1,
+  },
+  batterySettingsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+  },
+  batterySettingsButtonText: {
+    fontSize: 13,
     fontWeight: '700',
   },
 });

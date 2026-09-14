@@ -12,6 +12,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  Linking,
 } from 'react-native';
 import { useTheme } from '../../hooks/useTheme';
 import { useReminderStore } from '../../store/reminderStore';
@@ -26,6 +27,7 @@ import {
   formatTime12Hour,
   isValidTimeRange,
 } from '../../utils/timeUtils';
+import { notificationService } from '../../services/notificationService';
 
 export default function RemindersScreen() {
   const { colors, isDark } = useTheme();
@@ -154,6 +156,19 @@ export default function RemindersScreen() {
       if (!res.success) {
         Alert.alert('Duplicate / Invalid Time', res.error || 'Failed to add reminder.');
         return;
+      }
+
+      // Check notification permission status (Section 8)
+      const perm = await notificationService.getPermissionStatus();
+      if (perm !== 'granted') {
+        Alert.alert(
+          'Reminder Saved',
+          'Reminder saved, but notifications are disabled in Android settings. You can enable them anytime from Settings.',
+          [
+            { text: 'OK' },
+            { text: 'Settings', onPress: () => Linking.openSettings() },
+          ]
+        );
       }
     } else if (modalMode === 'edit' && activeEditingId) {
       const existing = customReminders.find((r) => r.id === activeEditingId);

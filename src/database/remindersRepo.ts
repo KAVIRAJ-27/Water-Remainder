@@ -9,6 +9,7 @@ export interface DbReminderSettings {
   defaultAmountMl: number;
   enabled: boolean;
   soundEnabled: boolean;
+  vibrationEnabled: boolean;
   snoozeMinutes: number;
 }
 
@@ -18,6 +19,7 @@ interface RawReminderRow {
   amount_ml: number;
   enabled: number;
   mode: string;
+  notification_id: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -30,6 +32,7 @@ interface RawSettingsRow {
   default_amount_ml: number;
   enabled: number;
   sound_enabled: number;
+  vibration_enabled: number;
   snooze_minutes: number;
 }
 
@@ -42,7 +45,7 @@ export async function getRemindersFromDb(): Promise<ReminderItem[]> {
 
   try {
     const rows = await db.getAllAsync<RawReminderRow>(
-      'SELECT id, time, amount_ml, enabled FROM reminders ORDER BY time ASC;'
+      'SELECT id, time, amount_ml, enabled, notification_id FROM reminders ORDER BY time ASC;'
     );
 
     return rows.map((r) => ({
@@ -50,6 +53,7 @@ export async function getRemindersFromDb(): Promise<ReminderItem[]> {
       time: r.time,
       amountMl: r.amount_ml,
       isEnabled: r.enabled === 1,
+      notificationId: r.notification_id,
     }));
   } catch (error) {
     console.error('[SQLite] Error loading reminders:', error);
@@ -70,14 +74,15 @@ export async function insertReminderToDb(
   try {
     const now = Date.now();
     await db.runAsync(
-      `INSERT INTO reminders (id, time, amount_ml, enabled, mode, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?);`,
+      `INSERT INTO reminders (id, time, amount_ml, enabled, mode, notification_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
       [
         reminder.id,
         reminder.time,
         reminder.amountMl,
         reminder.isEnabled ? 1 : 0,
         mode,
+        reminder.notificationId ?? null,
         now,
         now,
       ]
@@ -99,12 +104,13 @@ export async function updateReminderInDb(reminder: ReminderItem): Promise<boolea
   try {
     await db.runAsync(
       `UPDATE reminders
-       SET time = ?, amount_ml = ?, enabled = ?, updated_at = ?
+       SET time = ?, amount_ml = ?, enabled = ?, notification_id = ?, updated_at = ?
        WHERE id = ?;`,
       [
         reminder.time,
         reminder.amountMl,
         reminder.isEnabled ? 1 : 0,
+        reminder.notificationId ?? null,
         Date.now(),
         reminder.id,
       ]
@@ -112,6 +118,28 @@ export async function updateReminderInDb(reminder: ReminderItem): Promise<boolea
     return true;
   } catch (error) {
     console.error('[SQLite] Error updating reminder:', error);
+    return false;
+  }
+}
+
+/**
+ * Updates only the notification ID for a reminder in SQLite.
+ */
+export async function updateReminderNotificationIdInDb(
+  id: string,
+  notificationId: string | null
+): Promise<boolean> {
+  const db = await getDatabase();
+  if (!db) return false;
+
+  try {
+    await db.runAsync(
+      `UPDATE reminders SET notification_id = ?, updated_at = ? WHERE id = ?;`,
+      [notificationId, Date.now(), id]
+    );
+    return true;
+  } catch (error) {
+    console.error('[SQLite] Error updating notification_id:', error);
     return false;
   }
 }
@@ -167,9 +195,9 @@ export async function replaceAllRemindersInDb(
       const now = Date.now();
       for (const r of reminders) {
         await db.runAsync(
-          `INSERT INTO reminders (id, time, amount_ml, enabled, mode, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?);`,
-          [r.id, r.time, r.amountMl, r.isEnabled ? 1 : 0, mode, now, now]
+          `INSERT INTO reminders (id, time, amount_ml, enabled, mode, notification_id, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+          [r.id, r.time, r.amountMl, r.isEnabled ? 1 : 0, mode, r.notificationId ?? null, now, now]
         );
       }
     });
@@ -189,7 +217,7 @@ export async function getReminderSettingsFromDb(): Promise<DbReminderSettings | 
 
   try {
     const row = await db.getFirstAsync<RawSettingsRow>(
-      'SELECT mode, start_time, end_time, interval_minutes, default_amount_ml, enabled, sound_enabled, snooze_minutes FROM reminder_settings WHERE id = 1;'
+      'SELECT mode, start_time, end_time, interval_minutes, default_amount_ml, enabled, sound_enabled, vibration_enabled, snooze_minutes FROM reminder_settings WHERE id = 1;'
     );
 
     if (!row) return null;
@@ -202,6 +230,7 @@ export async function getReminderSettingsFromDb(): Promise<DbReminderSettings | 
       defaultAmountMl: row.default_amount_ml,
       enabled: row.enabled === 1,
       soundEnabled: row.sound_enabled === 1,
+      vibrationEnabled: row.vibration_enabled === 1,
       snoozeMinutes: row.snooze_minutes,
     };
   } catch (error) {
@@ -229,12 +258,13 @@ export async function saveReminderSettingsToDb(
       defaultAmountMl: settings.defaultAmountMl ?? current?.defaultAmountMl ?? 250,
       enabled: settings.enabled ?? current?.enabled ?? true,
       soundEnabled: settings.soundEnabled ?? current?.soundEnabled ?? true,
+      vibrationEnabled: settings.vibrationEnabled ?? current?.vibrationEnabled ?? true,
       snoozeMinutes: settings.snoozeMinutes ?? current?.snoozeMinutes ?? 10,
     };
 
     await db.runAsync(
       `UPDATE reminder_settings
-       SET mode = ?, start_time = ?, end_time = ?, interval_minutes = ?, default_amount_ml = ?, enabled = ?, sound_enabled = ?, snooze_minutes = ?
+       SET mode = ?, start_time = ?, end_time = ?, interval_minutes = ?, default_amount_ml = ?, enabled = ?, sound_enabled = ?, vibration_enabled = ?, snooze_minutes = ?
        WHERE id = 1;`,
       [
         merged.mode,
@@ -244,6 +274,7 @@ export async function saveReminderSettingsToDb(
         merged.defaultAmountMl,
         merged.enabled ? 1 : 0,
         merged.soundEnabled ? 1 : 0,
+        merged.vibrationEnabled ? 1 : 0,
         merged.snoozeMinutes,
       ]
     );
