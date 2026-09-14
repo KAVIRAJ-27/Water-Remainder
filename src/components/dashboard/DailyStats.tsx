@@ -4,6 +4,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { BorderRadius, Shadows, Spacing } from '../../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { UnitPreference } from '../../types';
+import { formatVolume } from '../../utils/unitUtils';
 
 interface DailyStatsProps {
   intakeMl: number;
@@ -15,19 +16,12 @@ interface DailyStatsProps {
 
 export function DailyStats({
   intakeMl,
-  goalMl,
+  goalMl: _goalMl,
   drinkCount,
   currentStreak,
   unit = 'ml',
 }: DailyStatsProps) {
   const { colors } = useTheme();
-
-  const formatVolume = (ml: number) => {
-    if (unit === 'L') {
-      return `${(ml / 1000).toFixed(1)} L`;
-    }
-    return `${ml} ml`;
-  };
 
   return (
     <View style={styles.container}>
@@ -45,7 +39,7 @@ export function DailyStats({
           <Ionicons name="water-outline" size={18} color={colors.primary} />
         </View>
         <Text style={[styles.statValue, { color: colors.text }]}>
-          {formatVolume(intakeMl)}
+          {formatVolume(intakeMl, unit)}
         </Text>
         <Text style={[styles.statTitle, { color: colors.textMuted }]}>Consumed</Text>
       </View>

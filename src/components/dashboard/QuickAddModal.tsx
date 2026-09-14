@@ -14,6 +14,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { BorderRadius, Shadows, Spacing } from '../../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { UnitPreference } from '../../types';
+import { validateDrinkAmount, formatVolume } from '../../utils/unitUtils';
 
 interface QuickAddModalProps {
   visible: boolean;
@@ -36,16 +37,16 @@ export function QuickAddModal({
     let ml = amountToLog;
 
     if (ml === undefined) {
-      const parsed = parseFloat(customAmount.trim());
-      if (isNaN(parsed) || parsed <= 0) {
-        setErrorMessage('Amount must be greater than 0');
+      const validation = validateDrinkAmount(customAmount, unit);
+      if (!validation.isValid) {
+        setErrorMessage(validation.errorMessage || 'Invalid water amount.');
         return;
       }
-      ml = unit === 'L' ? Math.round(parsed * 1000) : Math.round(parsed);
+      ml = validation.amountMl;
     }
 
     if (ml <= 0) {
-      setErrorMessage('Amount must be greater than 0 ml');
+      setErrorMessage('Amount must be greater than 0 ml.');
       return;
     }
 
@@ -165,7 +166,7 @@ export function QuickAddModal({
                       ]}
                     >
                       <Text style={[styles.presetText, { color: colors.text }]}>
-                        {unit === 'L' ? `${(presetMl / 1000).toFixed(2)} L` : `${presetMl} ml`}
+                        {formatVolume(presetMl, unit)}
                       </Text>
                     </TouchableOpacity>
                   ))}

@@ -10,6 +10,8 @@ import { BorderRadius, Shadows, Spacing } from '../../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { UnitPreference } from '../../types';
 
+import { formatVolume } from '../../utils/unitUtils';
+
 interface WaterButtonProps {
   amountMl: number;
   unit?: UnitPreference;
@@ -27,10 +29,7 @@ export function WaterButton({
 }: WaterButtonProps) {
   const { colors, isDark } = useTheme();
 
-  const displayLabel =
-    unit === 'L' && amountMl >= 500
-      ? `+${(amountMl / 1000).toFixed(1)} L`
-      : `+${amountMl} ml`;
+  const displayLabel = `+${formatVolume(amountMl, unit)}`;
 
   return (
     <TouchableOpacity

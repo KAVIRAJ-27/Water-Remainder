@@ -18,6 +18,7 @@ import { BorderRadius, Shadows, Spacing } from '../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { UnitPreference } from '../types';
 import { PrimaryButton } from '../components/PrimaryButton';
+import { validateDailyGoal } from '../utils/unitUtils';
 
 export default function OnboardingScreen() {
   const router = useRouter();
@@ -32,13 +33,13 @@ export default function OnboardingScreen() {
   const [endTime, setEndTime] = useState('10:00 PM');
 
   const handleFinish = () => {
-    const parsedGoal = parseFloat(dailyGoalText.trim());
-    if (isNaN(parsedGoal) || parsedGoal <= 0) {
-      Alert.alert('Validation Error', 'Please enter a valid daily water goal greater than 0.');
+    const validation = validateDailyGoal(dailyGoalText, unit);
+    if (!validation.isValid) {
+      Alert.alert('Validation Error', validation.errorMessage || 'Please enter a valid daily water goal.');
       return;
     }
 
-    const finalGoalMl = unit === 'L' ? Math.round(parsedGoal * 1000) : Math.round(parsedGoal);
+    const finalGoalMl = validation.amountMl;
 
     completeOnboarding({
       name: name.trim() || 'Kaviraj',

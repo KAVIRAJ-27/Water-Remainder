@@ -5,6 +5,7 @@ import { BorderRadius, Shadows, Spacing } from '../../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { DailyDataPoint } from '../../services/hydrationAnalytics';
 import { getTodayDateKey } from '../../utils/dateUtils';
+import { formatVolume } from '../../utils/unitUtils';
 
 interface WeeklyWaterChartProps {
   days: DailyDataPoint[];
@@ -15,13 +16,6 @@ interface WeeklyWaterChartProps {
 export function WeeklyWaterChart({ days, dailyGoal, unit }: WeeklyWaterChartProps) {
   const { colors } = useTheme();
   const todayKey = getTodayDateKey();
-
-  const formatVolume = (ml: number) => {
-    if (unit === 'L') {
-      return `${(ml / 1000).toFixed(1)} L`;
-    }
-    return `${ml} ml`;
-  };
 
   return (
     <View

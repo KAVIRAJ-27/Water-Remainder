@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { WaterLog } from '../../types';
 import { formatDateKeyFull, formatTimeFromTimestamp } from '../../utils/dateUtils';
 import { DailyDataPoint } from '../../services/hydrationAnalytics';
+import { formatVolume } from '../../utils/unitUtils';
 
 interface DateDetailModalProps {
   visible: boolean;
@@ -36,13 +37,6 @@ export function DateDetailModal({
   const { colors, isDark } = useTheme();
 
   if (!datePoint) return null;
-
-  const formatVolume = (ml: number) => {
-    if (unit === 'L') {
-      return `${(ml / 1000).toFixed(1)} L`;
-    }
-    return `${ml} ml`;
-  };
 
   const isGoalMet = datePoint.percentage >= 100;
 

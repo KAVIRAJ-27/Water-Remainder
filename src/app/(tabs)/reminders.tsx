@@ -28,6 +28,7 @@ import {
   isValidTimeRange,
 } from '../../utils/timeUtils';
 import { notificationService } from '../../services/notificationService';
+import { formatVolume } from '../../utils/unitUtils';
 
 export default function RemindersScreen() {
   const { colors, isDark } = useTheme();
@@ -294,7 +295,7 @@ export default function RemindersScreen() {
                   Interval Schedule Setup
                 </Text>
                 <Text style={[styles.configSubtitle, { color: colors.textSecondary }]}>
-                  Goal: {dailyGoal} ml • {defaultAmountMl} ml/drink ≈ {servingsEstimated} servings
+                  Goal: {formatVolume(dailyGoal, unit)} • {formatVolume(defaultAmountMl, unit)}/drink ≈ {servingsEstimated} servings
                 </Text>
               </View>
             </View>

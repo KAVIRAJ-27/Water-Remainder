@@ -8,8 +8,7 @@ export function formatVolume(amountMl: number, unit: UnitPreference = 'ml'): str
   const safeMl = Math.max(0, Math.round(amountMl || 0));
   if (unit === 'L') {
     const liters = safeMl / 1000;
-    // Format to 1 or 2 decimals without unnecessary trailing zeros
-    const formatted = liters % 1 === 0 ? liters.toFixed(0) : liters.toFixed(1);
+    const formatted = Number(liters.toFixed(2)).toString();
     return `${formatted} L`;
   }
   return `${safeMl} ml`;

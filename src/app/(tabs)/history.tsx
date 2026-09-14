@@ -18,6 +18,7 @@ import { DateDetailModal } from '../../components/history/DateDetailModal';
 import { DailyDataPoint } from '../../services/hydrationAnalytics';
 import { WaterLog } from '../../types';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { formatVolume as formatVolumeUnit } from '../../utils/unitUtils';
 
 export default function HistoryScreen() {
   const router = useRouter();
@@ -54,12 +55,7 @@ export default function HistoryScreen() {
     }, [dailyGoal, filterDays, loadTodayData, loadAnalytics])
   );
 
-  const formatVolume = (ml: number) => {
-    if (unit === 'L') {
-      return `${(ml / 1000).toFixed(1)} L`;
-    }
-    return `${ml} ml`;
-  };
+  const formatVolume = (ml: number) => formatVolumeUnit(ml, unit);
 
   const todayPercentage = dailyGoal > 0 ? Math.round((todayConsumed / dailyGoal) * 100) : 0;
   const remainingMl = Math.max(0, dailyGoal - todayConsumed);

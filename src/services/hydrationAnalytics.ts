@@ -82,26 +82,29 @@ export function calculateCurrentStreak(
 ): number {
   if (!dailyGoal || dailyGoal <= 0) return 0;
 
+  const parts = todayDateKey.split('-').map(Number);
+  const refDate = new Date(parts[0], parts[1] - 1, parts[2]);
+
   const todayConsumed = dailyTotalsMap.get(todayDateKey) ?? 0;
   const todayCompleted = todayConsumed >= dailyGoal;
 
   let streak = 0;
-  let offset = todayCompleted ? -1 : -1;
+  let offset = -1;
 
   if (todayCompleted) {
     streak = 1;
   } else {
     // Today not yet met: verify if yesterday met goal
-    const yesterdayKey = getOffsetDateKey(-1);
+    const yesterdayKey = getOffsetDateKey(-1, refDate);
     const yesterdayConsumed = dailyTotalsMap.get(yesterdayKey) ?? 0;
     if (yesterdayConsumed < dailyGoal) {
       return 0;
     }
   }
 
-  // Iterate backwards from yesterday (or day before yesterday if today completed)
+  // Iterate backwards from yesterday
   while (true) {
-    const checkKey = getOffsetDateKey(offset);
+    const checkKey = getOffsetDateKey(offset, refDate);
     const consumed = dailyTotalsMap.get(checkKey) ?? 0;
 
     if (consumed >= dailyGoal) {

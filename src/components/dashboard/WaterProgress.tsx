@@ -4,6 +4,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { BorderRadius, Shadows, Spacing } from '../../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { UnitPreference } from '../../types';
+import { formatVolume } from '../../utils/unitUtils';
 
 interface WaterProgressProps {
   currentMl: number;
@@ -15,17 +16,9 @@ export function WaterProgress({ currentMl, goalMl, unit = 'ml' }: WaterProgressP
   const { colors, isDark } = useTheme();
 
   const safeGoal = goalMl > 0 ? goalMl : 2500;
-  const percentage = Math.min(100, Math.round((currentMl / safeGoal) * 100));
+  const actualPercentage = Math.round((currentMl / safeGoal) * 100);
+  const visualPercentage = Math.min(100, actualPercentage);
   const remainingMl = Math.max(0, safeGoal - currentMl);
-
-  // Conversion helper
-  const formatVolume = (ml: number) => {
-    if (unit === 'L') {
-      const liters = (ml / 1000).toFixed(1);
-      return `${liters} L`;
-    }
-    return `${ml} ml`;
-  };
 
   return (
     <View
@@ -64,7 +57,7 @@ export function WaterProgress({ currentMl, goalMl, unit = 'ml' }: WaterProgressP
             style={[
               styles.liquidFill,
               {
-                height: `${Math.max(6, percentage)}%`,
+                height: `${Math.max(6, visualPercentage)}%`,
                 backgroundColor: colors.waterFill,
                 opacity: isDark ? 0.35 : 0.25,
               },
@@ -73,14 +66,14 @@ export function WaterProgress({ currentMl, goalMl, unit = 'ml' }: WaterProgressP
 
           <View style={styles.centerContent}>
             <Text style={[styles.percentageText, { color: colors.text }]}>
-              {percentage}%
+              {actualPercentage}%
             </Text>
             <Text style={[styles.amountText, { color: colors.primary }]}>
-              {formatVolume(currentMl)} / {formatVolume(safeGoal)}
+              {formatVolume(currentMl, unit)} / {formatVolume(safeGoal, unit)}
             </Text>
             <View style={styles.statusPill}>
               <Text style={[styles.statusLabel, { color: colors.textMuted }]}>
-                {percentage >= 100 ? 'Goal Met 🎉' : `${formatVolume(remainingMl)} remaining`}
+                {actualPercentage >= 100 ? 'Goal Met 🎉' : `${formatVolume(remainingMl, unit)} remaining`}
               </Text>
             </View>
           </View>
@@ -94,7 +87,7 @@ export function WaterProgress({ currentMl, goalMl, unit = 'ml' }: WaterProgressP
             style={[
               styles.barFill,
               {
-                width: `${percentage}%`,
+                width: `${visualPercentage}%`,
                 backgroundColor: colors.primary,
               },
             ]}
@@ -107,14 +100,14 @@ export function WaterProgress({ currentMl, goalMl, unit = 'ml' }: WaterProgressP
         <View style={styles.statItem}>
           <Text style={[styles.statSub, { color: colors.textMuted }]}>Remaining</Text>
           <Text style={[styles.statVal, { color: colors.text }]}>
-            {formatVolume(remainingMl)}
+            {formatVolume(remainingMl, unit)}
           </Text>
         </View>
         <View style={styles.divider} />
         <View style={styles.statItem}>
           <Text style={[styles.statSub, { color: colors.textMuted }]}>Daily Target</Text>
           <Text style={[styles.statVal, { color: colors.text }]}>
-            {formatVolume(safeGoal)}
+            {formatVolume(safeGoal, unit)}
           </Text>
         </View>
       </View>

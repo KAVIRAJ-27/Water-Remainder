@@ -10,6 +10,7 @@ import { useTheme } from '../hooks/useTheme';
 import { BorderRadius, Shadows, Spacing } from '../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { ReminderItem, UnitPreference } from '../types';
+import { formatVolume } from '../utils/unitUtils';
 
 interface ReminderCardProps {
   reminder: ReminderItem;
@@ -28,10 +29,7 @@ export function ReminderCard({
 }: ReminderCardProps) {
   const { colors, isDark } = useTheme();
 
-  const displayAmount =
-    unit === 'L'
-      ? `${(reminder.amountMl / 1000).toFixed(2)} L`
-      : `${reminder.amountMl} ml`;
+  const displayAmount = formatVolume(reminder.amountMl, unit);
 
   return (
     <View
