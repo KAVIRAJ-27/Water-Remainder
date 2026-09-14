@@ -6,7 +6,10 @@ import {
   ScrollView,
   SafeAreaView,
   TouchableOpacity,
+  Platform,
+  StatusBar as RNStatusBar,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../hooks/useTheme';
 import { useWaterStore } from '../../store/waterStore';
 import { useUserStore } from '../../store/userStore';
@@ -22,6 +25,11 @@ import { formatVolume as formatVolumeUnit } from '../../utils/unitUtils';
 
 export default function HistoryScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const topPadding = Math.max(
+    insets.top,
+    Platform.OS === 'android' ? RNStatusBar.currentHeight ?? 24 : 0
+  );
   const { colors, isDark } = useTheme();
 
   const { dailyGoal, unit } = useUserStore();
@@ -99,7 +107,7 @@ export default function HistoryScreen() {
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: topPadding + Spacing.sm }]}>
           <Text style={[styles.screenTitle, { color: colors.text }]}>Hydration History</Text>
           <Text style={[styles.screenSubtitle, { color: colors.textSecondary }]}>
             Consistency, weekly averages, streaks, and analytics

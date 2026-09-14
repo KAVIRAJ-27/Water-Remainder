@@ -10,7 +10,10 @@ import {
   Modal,
   TouchableWithoutFeedback,
   Linking,
+  Platform,
+  StatusBar as RNStatusBar,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import Constants from 'expo-constants';
 import { useTheme } from '../../hooks/useTheme';
@@ -29,6 +32,7 @@ import { formatVolume } from '../../utils/unitUtils';
 
 export default function SettingsScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { colors, themeMode, setThemeMode } = useTheme();
 
   // User store
@@ -63,6 +67,8 @@ export default function SettingsScreen() {
     soundEnabled,
     vibrationEnabled,
     snoozeMinutes,
+    alarmMode,
+    setAlarmMode,
     updateIntervalSettings,
     updateNotificationSettings,
     getNextReminderItem,
@@ -187,6 +193,7 @@ export default function SettingsScreen() {
   ];
 
   const appVersion = Constants.expoConfig?.version || '1.0.0';
+  const topPadding = Math.max(insets.top, Platform.OS === 'android' ? (RNStatusBar.currentHeight ?? 24) : 0);
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
@@ -195,7 +202,7 @@ export default function SettingsScreen() {
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: topPadding + Spacing.sm }]}>
           <Text style={[styles.screenTitle, { color: colors.text }]}>Settings</Text>
           <Text style={[styles.screenSubtitle, { color: colors.textSecondary }]}>
             Preferences, schedule, notifications, and profile
@@ -401,6 +408,15 @@ export default function SettingsScreen() {
               isSwitch
               switchValue={vibrationEnabled}
               onSwitchChange={(val) => updateNotificationSettings({ vibrationEnabled: val })}
+            />
+
+            <SettingRow
+              icon="alarm-outline"
+              title="Alarm-style reminders"
+              subtitle="High-intensity vibration & heads-up banner"
+              isSwitch
+              switchValue={alarmMode}
+              onSwitchChange={(val) => setAlarmMode(val)}
             />
 
             <SettingRow

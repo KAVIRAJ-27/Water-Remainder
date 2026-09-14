@@ -4,6 +4,8 @@ import * as SplashScreen from 'expo-splash-screen';
 import * as Notifications from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
 import { useUserStore } from '../store/userStore';
+import { useWaterStore } from '../store/waterStore';
+import { useReminderStore } from '../store/reminderStore';
 import { useTheme } from '../hooks/useTheme';
 import { View, Platform } from 'react-native';
 import { notificationService } from '../services/notificationService';
@@ -46,26 +48,60 @@ export default function RootLayout() {
     }
   }, [hasHydrated, onboardingCompleted, segments, router]);
 
-  // Handle incoming notification interactions (taps and snooze actions)
+  // Handle incoming notification interactions (taps, snooze, drink confirmations)
   useEffect(() => {
     if (Platform.OS === 'web') return;
 
-    const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+    const handleNotificationAction = async (response: Notifications.NotificationResponse) => {
       const actionId = response.actionIdentifier;
       const data = response.notification.request.content.data;
       const amountMl = Number(data?.amountMl) || 250;
+      const reminderId = data?.reminderId as string | undefined;
+      const alarmMode = useReminderStore.getState().alarmMode;
 
-      if (actionId === 'SNOOZE_15') {
-        notificationService.scheduleSnoozeReminder(15, amountMl);
+      if (actionId === 'DRINK_WATER' || actionId === 'CONFIRM_DRANK') {
+        // Record drinking event into SQLite and update store
+        const userGoal = useUserStore.getState().dailyGoal;
+        await useWaterStore.getState().addWater(amountMl, userGoal, reminderId);
+        if (reminderId) {
+          await notificationService.cancelFollowUpForReminder(reminderId);
+        }
+        await Notifications.dismissNotificationAsync(response.notification.request.identifier).catch(() => {});
+        if (onboardingCompleted) {
+          router.replace('/(tabs)');
+        }
+      } else if (actionId === 'NOT_YET') {
+        // Explicit user rejection: do not log water, dismiss notification
+        await Notifications.dismissNotificationAsync(response.notification.request.identifier).catch(() => {});
+      } else if (actionId === 'SNOOZE_15') {
+        if (reminderId) {
+          await notificationService.cancelFollowUpForReminder(reminderId);
+        }
+        await notificationService.scheduleSnoozeReminder(15, amountMl, reminderId, alarmMode);
+        await Notifications.dismissNotificationAsync(response.notification.request.identifier).catch(() => {});
       } else if (actionId === 'SNOOZE_30') {
-        notificationService.scheduleSnoozeReminder(30, amountMl);
+        if (reminderId) {
+          await notificationService.cancelFollowUpForReminder(reminderId);
+        }
+        await notificationService.scheduleSnoozeReminder(30, amountMl, reminderId, alarmMode);
+        await Notifications.dismissNotificationAsync(response.notification.request.identifier).catch(() => {});
       } else {
-        // User tapped notification directly: safely bring up Home dashboard
+        // User tapped the notification banner directly
         if (onboardingCompleted) {
           router.replace('/(tabs)');
         }
       }
+    };
+
+    // 1. Process cold-start notification response if opened from notification
+    Notifications.getLastNotificationResponseAsync().then((lastResponse) => {
+      if (lastResponse) {
+        handleNotificationAction(lastResponse);
+      }
     });
+
+    // 2. Listen to notification actions while app is running / in background
+    const subscription = Notifications.addNotificationResponseReceivedListener(handleNotificationAction);
 
     return () => {
       subscription.remove();

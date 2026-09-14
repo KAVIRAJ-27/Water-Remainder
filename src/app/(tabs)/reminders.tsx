@@ -13,7 +13,9 @@ import {
   Platform,
   Alert,
   Linking,
+  StatusBar as RNStatusBar,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../hooks/useTheme';
 import { useReminderStore } from '../../store/reminderStore';
 import { useUserStore } from '../../store/userStore';
@@ -31,6 +33,11 @@ import { notificationService } from '../../services/notificationService';
 import { formatVolume } from '../../utils/unitUtils';
 
 export default function RemindersScreen() {
+  const insets = useSafeAreaInsets();
+  const topPadding = Math.max(
+    insets.top,
+    Platform.OS === 'android' ? RNStatusBar.currentHeight ?? 24 : 0
+  );
   const { colors, isDark } = useTheme();
   const { unit, dailyGoal } = useUserStore();
 
@@ -209,7 +216,7 @@ export default function RemindersScreen() {
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: topPadding + Spacing.sm }]}>
           <Text style={[styles.screenTitle, { color: colors.text }]}>REMINDERS</Text>
           <Text style={[styles.screenSubtitle, { color: colors.textSecondary }]}>
             Personalized water schedule and smart alerts

@@ -1,4 +1,6 @@
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { WaterLog } from '../types';
 import {
   insertWaterLogInDb,
@@ -37,7 +39,7 @@ interface WaterState {
   // Actions
   loadTodayData: (dailyGoal?: number) => Promise<void>;
   loadAnalytics: (dailyGoal: number, filterDays?: number) => Promise<void>;
-  addWater: (amountMl: number, dailyGoal?: number) => Promise<{ success: boolean; error?: string }>;
+  addWater: (amountMl: number, dailyGoal?: number, reminderId?: string) => Promise<{ success: boolean; error?: string }>;
   removeWaterLog: (id: string, dailyGoal?: number) => Promise<void>;
   getLogsForSelectedDate: (dateKey: string) => Promise<WaterLog[]>;
   clearTodayData: (dailyGoal?: number) => Promise<void>;
@@ -45,38 +47,65 @@ interface WaterState {
   resetWaterStore: () => Promise<void>;
 }
 
-export const useWaterStore = create<WaterState>((set, get) => ({
-  todayConsumed: 0,
-  drinkCount: 0,
-  todayLogs: [],
-  isLoaded: false,
+export const useWaterStore = create<WaterState>()(
+  persist(
+    (set, get) => ({
+      todayConsumed: 0,
+      drinkCount: 0,
+      todayLogs: [],
+      isLoaded: false,
 
-  currentStreak: 0,
-  longestStreak: 0,
-  weeklyAverage: 0,
-  bestDay: null,
-  weeklyChartDays: [],
-  historyRecords: [],
+      currentStreak: 0,
+      longestStreak: 0,
+      weeklyAverage: 0,
+      bestDay: null,
+      weeklyChartDays: [],
+      historyRecords: [],
 
-  loadTodayData: async (dailyGoal: number = 2500) => {
-    try {
-      const todayKey = getTodayDateKey();
-      const summary = await getTodaySummaryFromDb(todayKey, dailyGoal);
+      loadTodayData: async (dailyGoal: number = 2500) => {
+        try {
+          const todayKey = getTodayDateKey();
+          const summary = await getTodaySummaryFromDb(todayKey, dailyGoal);
 
-      set({
-        todayConsumed: summary.consumedMl,
-        drinkCount: summary.drinkCount,
-        todayLogs: summary.logs,
-        isLoaded: true,
-      });
+          if (summary.logs.length > 0 || summary.consumedMl > 0) {
+            set({
+              todayConsumed: summary.consumedMl,
+              drinkCount: summary.drinkCount,
+              todayLogs: summary.logs,
+              isLoaded: true,
+            });
+          } else {
+            // Check if existing state already has valid logs for today
+            const existingTodayLogs = get().todayLogs.filter((l) => l.dateKey === todayKey);
+            if (existingTodayLogs.length > 0) {
+              // Sync memory logs to SQLite
+              for (const l of existingTodayLogs) {
+                await insertWaterLogInDb(l);
+              }
+              const reSummary = await getTodaySummaryFromDb(todayKey, dailyGoal);
+              set({
+                todayConsumed: reSummary.consumedMl,
+                drinkCount: reSummary.drinkCount,
+                todayLogs: reSummary.logs,
+                isLoaded: true,
+              });
+            } else {
+              set({
+                todayConsumed: 0,
+                drinkCount: 0,
+                todayLogs: [],
+                isLoaded: true,
+              });
+            }
+          }
 
-      // Also refresh streaks
-      await get().loadAnalytics(dailyGoal, 7);
-    } catch (error) {
-      console.error('[WaterStore] Failed to load today data:', error);
-      set({ isLoaded: true });
-    }
-  },
+          // Also refresh streaks
+          await get().loadAnalytics(dailyGoal, 7);
+        } catch (error) {
+          console.error('[WaterStore] Failed to load today data:', error);
+          set({ isLoaded: true });
+        }
+      },
 
   loadAnalytics: async (dailyGoal: number, filterDays: number = 7) => {
     try {
@@ -159,7 +188,7 @@ export const useWaterStore = create<WaterState>((set, get) => ({
     }
   },
 
-  addWater: async (amountMl: number, dailyGoal: number = 2500) => {
+  addWater: async (amountMl: number, dailyGoal: number = 2500, reminderId?: string) => {
     if (!amountMl || amountMl <= 0 || isNaN(amountMl)) {
       return { success: false, error: 'Amount must be greater than 0 ml' };
     }
@@ -171,6 +200,7 @@ export const useWaterStore = create<WaterState>((set, get) => ({
       amountMl: validAmount,
       timestamp: Date.now(),
       dateKey: todayKey,
+      reminderId: reminderId ?? null,
     };
 
     // 1. Insert into SQLite
@@ -257,4 +287,17 @@ export const useWaterStore = create<WaterState>((set, get) => ({
       historyRecords: [],
     });
   },
-}));
+}),
+    {
+      name: 'hydroreminder-water-storage',
+      storage: createJSONStorage(() => AsyncStorage),
+      partialize: (state) => ({
+        todayConsumed: state.todayConsumed,
+        drinkCount: state.drinkCount,
+        todayLogs: state.todayLogs,
+        currentStreak: state.currentStreak,
+        longestStreak: state.longestStreak,
+      }),
+    }
+  )
+);

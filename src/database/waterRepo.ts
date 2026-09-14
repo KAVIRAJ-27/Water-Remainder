@@ -12,6 +12,7 @@ interface RawWaterLogRow {
   amount_ml: number;
   timestamp: number;
   date_key: string;
+  reminder_id: string | null;
 }
 
 interface RawDailyTotalRow {
@@ -29,9 +30,9 @@ export async function insertWaterLogInDb(log: WaterLog): Promise<boolean> {
 
   try {
     await db.runAsync(
-      `INSERT INTO water_logs (id, amount_ml, timestamp, date_key)
-       VALUES (?, ?, ?, ?);`,
-      [log.id, log.amountMl, log.timestamp, log.dateKey]
+      `INSERT INTO water_logs (id, amount_ml, timestamp, date_key, reminder_id)
+       VALUES (?, ?, ?, ?, ?);`,
+      [log.id, log.amountMl, log.timestamp, log.dateKey, log.reminderId ?? null]
     );
     return true;
   } catch (error) {
@@ -97,7 +98,7 @@ export async function getWaterLogsForDateFromDb(dateKey: string): Promise<WaterL
 
   try {
     const rows = await db.getAllAsync<RawWaterLogRow>(
-      'SELECT id, amount_ml, timestamp, date_key FROM water_logs WHERE date_key = ? ORDER BY timestamp DESC;',
+      'SELECT id, amount_ml, timestamp, date_key, reminder_id FROM water_logs WHERE date_key = ? ORDER BY timestamp DESC;',
       [dateKey]
     );
 
@@ -106,6 +107,7 @@ export async function getWaterLogsForDateFromDb(dateKey: string): Promise<WaterL
       amountMl: r.amount_ml,
       timestamp: r.timestamp,
       dateKey: r.date_key,
+      reminderId: r.reminder_id,
     }));
   } catch (error) {
     console.error(`[SQLite] Error fetching logs for date ${dateKey}:`, error);

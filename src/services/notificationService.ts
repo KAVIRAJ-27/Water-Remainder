@@ -2,10 +2,16 @@ import * as Notifications from 'expo-notifications';
 import { Platform, Alert } from 'react-native';
 import { ReminderItem } from '../types';
 import { parseTimeToMinutes } from '../utils/timeUtils';
-import { updateReminderNotificationIdInDb } from '../database/remindersRepo';
+import {
+  updateReminderNotificationIdInDb,
+  updateReminderFollowUpNotificationIdInDb,
+} from '../database/remindersRepo';
 
-export const WATER_NOTIFICATION_CHANNEL_ID = 'water-reminders';
+export const WATER_NOTIFICATION_CHANNEL_NORMAL = 'water-reminders-normal';
+export const WATER_NOTIFICATION_CHANNEL_ALARM = 'water-reminders-alarm';
+
 export const WATER_NOTIFICATION_CATEGORY_ID = 'WATER_REMINDER';
+export const WATER_FOLLOW_UP_CATEGORY_ID = 'WATER_FOLLOW_UP';
 
 // Configure foreground presentation behavior for local notifications
 if (Platform.OS !== 'web') {
@@ -21,16 +27,44 @@ if (Platform.OS !== 'web') {
 }
 
 export interface NotificationService {
-  initializeNotifications: (soundEnabled?: boolean, vibrationEnabled?: boolean) => Promise<void>;
+  initializeNotifications: (
+    soundEnabled?: boolean,
+    vibrationEnabled?: boolean,
+    alarmMode?: boolean
+  ) => Promise<void>;
   requestNotificationPermission: (explainIfCanAsk?: boolean) => Promise<boolean>;
   getPermissionStatus: () => Promise<Notifications.PermissionStatus>;
-  configureNotificationChannel: (soundEnabled?: boolean, vibrationEnabled?: boolean) => Promise<void>;
-  scheduleReminder: (reminder: ReminderItem, channelConfig?: { soundEnabled?: boolean; vibrationEnabled?: boolean }) => Promise<string | null>;
-  cancelReminder: (reminderId: string, notificationId?: string | null) => Promise<void>;
+  configureNotificationChannels: (
+    soundEnabled?: boolean,
+    vibrationEnabled?: boolean,
+    alarmMode?: boolean
+  ) => Promise<void>;
+  scheduleReminder: (
+    reminder: ReminderItem,
+    channelConfig?: { soundEnabled?: boolean; vibrationEnabled?: boolean; alarmMode?: boolean }
+  ) => Promise<{ notificationId: string | null; followUpNotificationId: string | null }>;
+  cancelReminder: (
+    reminderId: string,
+    notificationId?: string | null,
+    followUpNotificationId?: string | null
+  ) => Promise<void>;
+  cancelFollowUpForReminder: (reminderId: string) => Promise<void>;
   cancelAllReminders: () => Promise<void>;
-  rescheduleAllReminders: (reminders: ReminderItem[]) => Promise<void>;
-  reconcileNotifications: (reminders: ReminderItem[], notificationsEnabled: boolean) => Promise<void>;
-  scheduleSnoozeReminder: (minutes: number, amountMl: number) => Promise<string | null>;
+  rescheduleAllReminders: (
+    reminders: ReminderItem[],
+    alarmMode?: boolean
+  ) => Promise<void>;
+  reconcileNotifications: (
+    reminders: ReminderItem[],
+    notificationsEnabled: boolean,
+    alarmMode?: boolean
+  ) => Promise<void>;
+  scheduleSnoozeReminder: (
+    minutes: number,
+    amountMl: number,
+    reminderId?: string,
+    alarmMode?: boolean
+  ) => Promise<string | null>;
   getScheduledNotifications: () => Promise<Notifications.NotificationRequest[]>;
 }
 
@@ -42,12 +76,13 @@ class ExpoNotificationService implements NotificationService {
    */
   async initializeNotifications(
     soundEnabled: boolean = true,
-    vibrationEnabled: boolean = true
+    vibrationEnabled: boolean = true,
+    alarmMode: boolean = false
   ): Promise<void> {
     if (Platform.OS === 'web') return;
 
     try {
-      await this.configureNotificationChannel(soundEnabled, vibrationEnabled);
+      await this.configureNotificationChannels(soundEnabled, vibrationEnabled, alarmMode);
       await this.setupNotificationCategories();
       this.hasInitialized = true;
     } catch (error) {
@@ -56,16 +91,18 @@ class ExpoNotificationService implements NotificationService {
   }
 
   /**
-   * Configures the Android Notification Channel.
+   * Configures both Normal and Alarm-Style Android Notification Channels.
    */
-  async configureNotificationChannel(
+  async configureNotificationChannels(
     soundEnabled: boolean = true,
-    vibrationEnabled: boolean = true
+    vibrationEnabled: boolean = true,
+    _alarmMode: boolean = false
   ): Promise<void> {
     if (Platform.OS !== 'android') return;
 
     try {
-      await Notifications.setNotificationChannelAsync(WATER_NOTIFICATION_CHANNEL_ID, {
+      // 1. Normal reminder channel (Balanced notification)
+      await Notifications.setNotificationChannelAsync(WATER_NOTIFICATION_CHANNEL_NORMAL, {
         name: 'Water Reminders',
         importance: Notifications.AndroidImportance.HIGH,
         sound: soundEnabled ? 'default' : null,
@@ -74,6 +111,23 @@ class ExpoNotificationService implements NotificationService {
         lightColor: '#00A8FF',
         description: 'Hydration reminder notifications for HydroReminder',
         showBadge: false,
+        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+      });
+
+      // 2. Alarm-style channel (Heads-up banner, high-intensity vibration pattern)
+      await Notifications.setNotificationChannelAsync(WATER_NOTIFICATION_CHANNEL_ALARM, {
+        name: 'Water Reminders (Alarm Mode)',
+        importance: Notifications.AndroidImportance.MAX,
+        sound: soundEnabled ? 'default' : null,
+        vibrationPattern: vibrationEnabled
+          ? [0, 500, 250, 500, 250, 1000, 500, 1000]
+          : null,
+        enableVibrate: vibrationEnabled,
+        lightColor: '#00A8FF',
+        description: 'Urgent alarm-style hydration notifications for HydroReminder',
+        showBadge: true,
+        bypassDnd: false,
+        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
       });
     } catch (error) {
       console.warn('[NotificationService] Channel setup failed:', error);
@@ -81,13 +135,45 @@ class ExpoNotificationService implements NotificationService {
   }
 
   /**
-   * Registers notification actions (e.g. Snooze 15m, Snooze 30m).
+   * Registers notification action categories:
+   * 1. Primary Reminder: [Drink Water], [Snooze 15m], [Snooze 30m]
+   * 2. Follow-Up (5 min): [Yes, I drank], [Not yet], [Snooze 15m], [Snooze 30m]
    */
   private async setupNotificationCategories(): Promise<void> {
     if (Platform.OS === 'web') return;
 
     try {
+      // Category 1: Main reminder actions
       await Notifications.setNotificationCategoryAsync(WATER_NOTIFICATION_CATEGORY_ID, [
+        {
+          identifier: 'DRINK_WATER',
+          buttonTitle: 'Drink Water 💧',
+          options: { opensAppToForeground: true },
+        },
+        {
+          identifier: 'SNOOZE_15',
+          buttonTitle: 'Snooze 15m',
+          options: { opensAppToForeground: false },
+        },
+        {
+          identifier: 'SNOOZE_30',
+          buttonTitle: 'Snooze 30m',
+          options: { opensAppToForeground: false },
+        },
+      ]);
+
+      // Category 2: 5-minute follow-up actions
+      await Notifications.setNotificationCategoryAsync(WATER_FOLLOW_UP_CATEGORY_ID, [
+        {
+          identifier: 'CONFIRM_DRANK',
+          buttonTitle: 'Yes, I drank 💧',
+          options: { opensAppToForeground: true },
+        },
+        {
+          identifier: 'NOT_YET',
+          buttonTitle: 'Not yet',
+          options: { opensAppToForeground: false },
+        },
         {
           identifier: 'SNOOZE_15',
           buttonTitle: 'Snooze 15m',
@@ -100,7 +186,6 @@ class ExpoNotificationService implements NotificationService {
         },
       ]);
     } catch (error) {
-      // Safe fallback if action categories aren't supported on device
       console.warn('[NotificationService] Category setup fallback:', error);
     }
   }
@@ -132,7 +217,6 @@ class ExpoNotificationService implements NotificationService {
       }
 
       if (current.canAskAgain && explainIfCanAsk) {
-        // Show explanation dialog first
         await new Promise<void>((resolve) => {
           Alert.alert(
             'Enable Hydration Reminders 💧',
@@ -159,19 +243,27 @@ class ExpoNotificationService implements NotificationService {
   }
 
   /**
-   * Schedules a daily recurring notification for an enabled reminder.
+   * Schedules a daily recurring reminder notification PLUS exactly ONE 5-minute follow-up.
    */
   async scheduleReminder(
     reminder: ReminderItem,
-    channelConfig?: { soundEnabled?: boolean; vibrationEnabled?: boolean }
-  ): Promise<string | null> {
-    if (Platform.OS === 'web' || !reminder.isEnabled) return null;
+    channelConfig?: { soundEnabled?: boolean; vibrationEnabled?: boolean; alarmMode?: boolean }
+  ): Promise<{ notificationId: string | null; followUpNotificationId: string | null }> {
+    if (Platform.OS === 'web' || !reminder.isEnabled) {
+      return { notificationId: null, followUpNotificationId: null };
+    }
 
     try {
+      const isAlarm = channelConfig?.alarmMode ?? false;
+      const channelId = isAlarm
+        ? WATER_NOTIFICATION_CHANNEL_ALARM
+        : WATER_NOTIFICATION_CHANNEL_NORMAL;
+
       if (!this.hasInitialized) {
         await this.initializeNotifications(
           channelConfig?.soundEnabled ?? true,
-          channelConfig?.vibrationEnabled ?? true
+          channelConfig?.vibrationEnabled ?? true,
+          isAlarm
         );
       }
 
@@ -179,20 +271,28 @@ class ExpoNotificationService implements NotificationService {
       const hour = Math.floor(totalMinutes / 60);
       const minute = totalMinutes % 60;
 
-      // Cancel previous notification if one was assigned
+      // Clean up previous notifications if any
       if (reminder.notificationId) {
         await this.cancelNotificationById(reminder.notificationId);
       }
+      if (reminder.followUpNotificationId) {
+        await this.cancelNotificationById(reminder.followUpNotificationId);
+      }
 
+      // 1. Schedule Primary Reminder
       const notificationId = await Notifications.scheduleNotificationAsync({
         content: {
           title: '💧 Time to drink water!',
           body: `Drink ${reminder.amountMl} ml of water to stay hydrated.`,
           sound: channelConfig?.soundEnabled !== false,
+          priority: isAlarm
+            ? Notifications.AndroidNotificationPriority.MAX
+            : Notifications.AndroidNotificationPriority.HIGH,
           data: {
             reminderId: reminder.id,
             amountMl: reminder.amountMl,
             time: reminder.time,
+            isOriginal: true,
           },
           categoryIdentifier: WATER_NOTIFICATION_CATEGORY_ID,
         },
@@ -200,44 +300,108 @@ class ExpoNotificationService implements NotificationService {
           type: Notifications.SchedulableTriggerInputTypes.DAILY,
           hour,
           minute,
-          channelId: WATER_NOTIFICATION_CHANNEL_ID,
+          channelId,
         },
       });
 
-      // Persist mapping to SQLite
-      await updateReminderNotificationIdInDb(reminder.id, notificationId);
+      // 2. Schedule 5-Minute Follow-Up Reminder (hour and minute + 5, modulo 24 hours)
+      const followUpMinutes = (totalMinutes + 5) % (24 * 60);
+      const followUpHour = Math.floor(followUpMinutes / 60);
+      const followUpMinute = followUpMinutes % 60;
 
-      return notificationId;
+      const followUpNotificationId = await Notifications.scheduleNotificationAsync({
+        content: {
+          title: '💧 Did you drink the water?',
+          body: `Confirm if you drank ${reminder.amountMl} ml of water to stay on track!`,
+          sound: channelConfig?.soundEnabled !== false,
+          priority: isAlarm
+            ? Notifications.AndroidNotificationPriority.MAX
+            : Notifications.AndroidNotificationPriority.HIGH,
+          data: {
+            reminderId: reminder.id,
+            amountMl: reminder.amountMl,
+            time: reminder.time,
+            isFollowUp: true,
+          },
+          categoryIdentifier: WATER_FOLLOW_UP_CATEGORY_ID,
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.DAILY,
+          hour: followUpHour,
+          minute: followUpMinute,
+          channelId,
+        },
+      });
+
+      // Persist IDs to SQLite
+      await updateReminderNotificationIdInDb(reminder.id, notificationId);
+      await updateReminderFollowUpNotificationIdInDb(reminder.id, followUpNotificationId);
+
+      return { notificationId, followUpNotificationId };
     } catch (error) {
       console.warn(`[NotificationService] Failed to schedule reminder ${reminder.id}:`, error);
-      return null;
+      return { notificationId: null, followUpNotificationId: null };
     }
   }
 
   /**
-   * Cancels a scheduled reminder notification.
+   * Cancels a scheduled reminder notification and its follow-up.
    */
-  async cancelReminder(reminderId: string, notificationId?: string | null): Promise<void> {
+  async cancelReminder(
+    reminderId: string,
+    notificationId?: string | null,
+    followUpNotificationId?: string | null
+  ): Promise<void> {
     if (Platform.OS === 'web') return;
 
     try {
       if (notificationId) {
         await this.cancelNotificationById(notificationId);
-      } else {
-        // Find matching notification by data payload
-        const scheduled = await Notifications.getAllScheduledNotificationsAsync();
-        const target = scheduled.find(
-          (req) => req.content.data?.reminderId === reminderId
-        );
-        if (target) {
-          await Notifications.cancelScheduledNotificationAsync(target.identifier);
+      }
+      if (followUpNotificationId) {
+        await this.cancelNotificationById(followUpNotificationId);
+      }
+
+      // Also clean up by reminderId tag in data
+      const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+      for (const req of scheduled) {
+        if (req.content.data?.reminderId === reminderId) {
+          await Notifications.cancelScheduledNotificationAsync(req.identifier);
         }
       }
 
       // Clear from SQLite
       await updateReminderNotificationIdInDb(reminderId, null);
+      await updateReminderFollowUpNotificationIdInDb(reminderId, null);
     } catch (error) {
       console.warn(`[NotificationService] Failed to cancel reminder ${reminderId}:`, error);
+    }
+  }
+
+  /**
+   * Cancels any pending or delivered 5-minute follow-up notifications for a reminder.
+   * Called when user confirms drinking or snoozes the reminder.
+   */
+  async cancelFollowUpForReminder(reminderId: string): Promise<void> {
+    if (Platform.OS === 'web') return;
+
+    try {
+      const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+      for (const req of scheduled) {
+        if (req.content.data?.reminderId === reminderId && req.content.data?.isFollowUp) {
+          await Notifications.cancelScheduledNotificationAsync(req.identifier);
+        }
+      }
+
+      // Also dismiss any already-displayed follow-up notifications on Android
+      const presented = await Notifications.getPresentedNotificationsAsync();
+      for (const p of presented) {
+        if (p.request.content.data?.reminderId === reminderId) {
+          await Notifications.dismissNotificationAsync(p.request.identifier);
+        }
+      }
+    } catch (error) {
+      console.warn(`[NotificationService] Error cancelling follow-up for ${reminderId}:`, error);
     }
   }
 
@@ -260,6 +424,7 @@ class ExpoNotificationService implements NotificationService {
 
     try {
       await Notifications.cancelAllScheduledNotificationsAsync();
+      await Notifications.dismissAllNotificationsAsync();
     } catch (error) {
       console.warn('[NotificationService] Failed to cancel all notifications:', error);
     }
@@ -268,14 +433,17 @@ class ExpoNotificationService implements NotificationService {
   /**
    * Reschedules all active reminders.
    */
-  async rescheduleAllReminders(reminders: ReminderItem[]): Promise<void> {
+  async rescheduleAllReminders(
+    reminders: ReminderItem[],
+    alarmMode: boolean = false
+  ): Promise<void> {
     if (Platform.OS === 'web') return;
 
     try {
       await this.cancelAllReminders();
       for (const rem of reminders) {
         if (rem.isEnabled) {
-          await this.scheduleReminder(rem);
+          await this.scheduleReminder(rem, { alarmMode });
         }
       }
     } catch (error) {
@@ -285,11 +453,12 @@ class ExpoNotificationService implements NotificationService {
 
   /**
    * Reconciles scheduled notifications with SQLite database to prevent duplicates
-   * or orphaned notifications when app is reopened.
+   * or orphaned notifications when app is reopened or settings change.
    */
   async reconcileNotifications(
     reminders: ReminderItem[],
-    notificationsEnabled: boolean
+    notificationsEnabled: boolean,
+    alarmMode: boolean = false
   ): Promise<void> {
     if (Platform.OS === 'web') return;
 
@@ -304,6 +473,9 @@ class ExpoNotificationService implements NotificationService {
         for (const rem of reminders) {
           if (rem.notificationId) {
             await updateReminderNotificationIdInDb(rem.id, null);
+          }
+          if (rem.followUpNotificationId) {
+            await updateReminderFollowUpNotificationIdInDb(rem.id, null);
           }
         }
         return;
@@ -321,15 +493,19 @@ class ExpoNotificationService implements NotificationService {
         }
       }
 
-      // 2. Ensure each enabled reminder has a single, valid scheduled notification
+      // 2. Ensure each enabled reminder has valid primary and follow-up notifications
       for (const rem of enabledReminders) {
-        const hasExistingScheduled = rem.notificationId && scheduledIdSet.has(rem.notificationId);
+        const hasPrimary = rem.notificationId && scheduledIdSet.has(rem.notificationId);
+        const hasFollowUp =
+          rem.followUpNotificationId && scheduledIdSet.has(rem.followUpNotificationId);
 
-        if (!hasExistingScheduled) {
-          // Missing or stale: schedule clean notification
-          const newId = await this.scheduleReminder(rem);
-          if (newId) {
-            rem.notificationId = newId;
+        if (!hasPrimary || !hasFollowUp) {
+          const res = await this.scheduleReminder(rem, { alarmMode });
+          if (res.notificationId) {
+            rem.notificationId = res.notificationId;
+          }
+          if (res.followUpNotificationId) {
+            rem.followUpNotificationId = res.followUpNotificationId;
           }
         }
       }
@@ -339,18 +515,37 @@ class ExpoNotificationService implements NotificationService {
   }
 
   /**
-   * Schedules a one-off temporary notification for the Snooze feature.
+   * Schedules a one-off temporary notification for the Snooze feature (15m or 30m),
+   * PLUS a 5-minute follow-up after the snooze timer expires.
    */
-  async scheduleSnoozeReminder(minutes: number, amountMl: number): Promise<string | null> {
+  async scheduleSnoozeReminder(
+    minutes: number,
+    amountMl: number,
+    reminderId?: string,
+    alarmMode: boolean = false
+  ): Promise<string | null> {
     if (Platform.OS === 'web' || minutes <= 0) return null;
 
     try {
+      const parentId = reminderId ?? `snooze-${Date.now()}`;
+      const channelId = alarmMode
+        ? WATER_NOTIFICATION_CHANNEL_ALARM
+        : WATER_NOTIFICATION_CHANNEL_NORMAL;
+
+      // Cancel any previous follow-up for this reminder
+      await this.cancelFollowUpForReminder(parentId);
+
+      // 1. Schedule Snooze notification
       const notifId = await Notifications.scheduleNotificationAsync({
         content: {
           title: '💧 Snooze Reminder: Drink water!',
           body: `Drink ${amountMl} ml of water to maintain your hydration.`,
           sound: true,
+          priority: alarmMode
+            ? Notifications.AndroidNotificationPriority.MAX
+            : Notifications.AndroidNotificationPriority.HIGH,
           data: {
+            reminderId: parentId,
             isSnooze: true,
             amountMl,
           },
@@ -359,7 +554,30 @@ class ExpoNotificationService implements NotificationService {
         trigger: {
           type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
           seconds: minutes * 60,
-          channelId: WATER_NOTIFICATION_CHANNEL_ID,
+          channelId,
+        },
+      });
+
+      // 2. Schedule 5-minute follow-up after snooze
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: '💧 Did you drink the water?',
+          body: `Confirm if you drank ${amountMl} ml of water!`,
+          sound: true,
+          priority: alarmMode
+            ? Notifications.AndroidNotificationPriority.MAX
+            : Notifications.AndroidNotificationPriority.HIGH,
+          data: {
+            reminderId: parentId,
+            isFollowUp: true,
+            amountMl,
+          },
+          categoryIdentifier: WATER_FOLLOW_UP_CATEGORY_ID,
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+          seconds: (minutes + 5) * 60,
+          channelId,
         },
       });
 

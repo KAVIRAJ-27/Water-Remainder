@@ -7,7 +7,10 @@ import {
   SafeAreaView,
   TouchableOpacity,
   Alert,
+  Platform,
+  StatusBar as RNStatusBar,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import { useTheme } from '../../hooks/useTheme';
 import { useUserStore } from '../../store/userStore';
@@ -25,6 +28,11 @@ import { formatVolume } from '../../utils/unitUtils';
 
 export default function HomeScreen() {
   const { colors, isDark } = useTheme();
+  const insets = useSafeAreaInsets();
+  const topPadding = Math.max(
+    insets.top,
+    Platform.OS === 'android' ? RNStatusBar.currentHeight ?? 24 : 0
+  );
 
   // Stores
   const user = useUserStore();
@@ -47,7 +55,8 @@ export default function HomeScreen() {
 
   useFocusEffect(
     React.useCallback(() => {
-      loadTodayData(user.dailyGoal);
+      const goal = user.dailyGoal || 2500;
+      loadTodayData(goal);
     }, [user.dailyGoal, loadTodayData])
   );
 
@@ -100,8 +109,8 @@ export default function HomeScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header with greeting */}
-        <View style={styles.header}>
+        {/* Header with greeting positioned below Android status bar */}
+        <View style={[styles.header, { paddingTop: topPadding + Spacing.sm }]}>
           <View style={styles.headerLeft}>
             <View
               style={[
@@ -111,13 +120,13 @@ export default function HomeScreen() {
                 },
               ]}
             >
-              <Ionicons name="water" size={24} color={colors.primary} />
+              <Ionicons name="water" size={22} color={colors.primary} />
             </View>
-            <View>
+            <View style={styles.headerTextWrap}>
               <Text style={[styles.greeting, { color: colors.textSecondary }]}>
                 {greeting}
               </Text>
-              <Text style={[styles.appTitle, { color: colors.text }]}>
+              <Text style={[styles.appTitle, { color: colors.text }]} numberOfLines={1}>
                 {user.name}
               </Text>
             </View>
@@ -360,23 +369,28 @@ const styles = StyleSheet.create({
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
+  },
+  headerTextWrap: {
+    justifyContent: 'center',
+    gap: 2,
   },
   logoBadge: {
-    width: 44,
-    height: 44,
+    width: 40,
+    height: 40,
     borderRadius: BorderRadius.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
   greeting: {
     fontSize: 13,
-    fontWeight: '500',
+    fontWeight: '600',
+    letterSpacing: 0.1,
   },
   appTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '800',
-    letterSpacing: -0.5,
+    letterSpacing: -0.3,
   },
   datePill: {
     flexDirection: 'row',

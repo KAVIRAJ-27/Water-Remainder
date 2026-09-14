@@ -20,6 +20,7 @@ export interface WaterLog {
   amountMl: number;
   timestamp: number;
   dateKey: string; // YYYY-MM-DD
+  reminderId?: string | null;
 }
 
 export interface ReminderItem {
@@ -28,6 +29,7 @@ export interface ReminderItem {
   amountMl: number;
   isEnabled: boolean;
   notificationId?: string | null;
+  followUpNotificationId?: string | null;
 }
 
 export interface DailyHistoryRecord {

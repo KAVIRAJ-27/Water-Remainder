@@ -2,6 +2,7 @@ import * as SQLite from 'expo-sqlite';
 import { Platform } from 'react-native';
 
 let dbInstance: SQLite.SQLiteDatabase | null = null;
+let dbPromise: Promise<SQLite.SQLiteDatabase | null> | null = null;
 
 /**
  * Returns the singleton SQLite database instance, initializing schemas if needed.
@@ -16,15 +17,24 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase | null> {
     return dbInstance;
   }
 
-  try {
-    const db = await SQLite.openDatabaseAsync('hydroreminder.db');
-    await initDatabaseSchema(db);
-    dbInstance = db;
-    return dbInstance;
-  } catch (error) {
-    console.error('[SQLite] Failed to initialize database:', error);
-    return null;
+  if (dbPromise) {
+    return dbPromise;
   }
+
+  dbPromise = (async () => {
+    try {
+      const db = await SQLite.openDatabaseAsync('hydroreminder.db');
+      await initDatabaseSchema(db);
+      dbInstance = db;
+      return dbInstance;
+    } catch (error) {
+      console.error('[SQLite] Failed to initialize database:', error);
+      dbPromise = null;
+      return null;
+    }
+  })();
+
+  return dbPromise;
 }
 
 /**
@@ -42,6 +52,7 @@ async function initDatabaseSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       enabled INTEGER NOT NULL DEFAULT 1,
       mode TEXT NOT NULL DEFAULT 'custom',
       notification_id TEXT,
+      follow_up_notification_id TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -57,14 +68,15 @@ async function initDatabaseSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       enabled INTEGER NOT NULL DEFAULT 1,
       sound_enabled INTEGER NOT NULL DEFAULT 1,
       vibration_enabled INTEGER NOT NULL DEFAULT 1,
-      snooze_minutes INTEGER NOT NULL DEFAULT 10
+      snooze_minutes INTEGER NOT NULL DEFAULT 10,
+      alarm_mode INTEGER NOT NULL DEFAULT 0
     );
 
     -- Seed default reminder settings if empty
     INSERT OR IGNORE INTO reminder_settings (
-      id, mode, start_time, end_time, interval_minutes, default_amount_ml, enabled, sound_enabled, vibration_enabled, snooze_minutes
+      id, mode, start_time, end_time, interval_minutes, default_amount_ml, enabled, sound_enabled, vibration_enabled, snooze_minutes, alarm_mode
     ) VALUES (
-      1, 'interval', '08:00 AM', '10:00 PM', 60, 250, 1, 1, 1, 10
+      1, 'interval', '08:00 AM', '10:00 PM', 60, 250, 1, 1, 1, 10, 0
     );
 
     -- Water logs table foundation
@@ -72,7 +84,8 @@ async function initDatabaseSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       id TEXT PRIMARY KEY NOT NULL,
       amount_ml INTEGER NOT NULL,
       timestamp INTEGER NOT NULL,
-      date_key TEXT NOT NULL
+      date_key TEXT NOT NULL,
+      reminder_id TEXT
     );
 
     -- User settings table (single configuration row)
@@ -105,8 +118,11 @@ async function initDatabaseSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     if (!reminderCols.some((c) => c.name === 'notification_id')) {
       await db.execAsync('ALTER TABLE reminders ADD COLUMN notification_id TEXT;');
     }
+    if (!reminderCols.some((c) => c.name === 'follow_up_notification_id')) {
+      await db.execAsync('ALTER TABLE reminders ADD COLUMN follow_up_notification_id TEXT;');
+    }
   } catch (err) {
-    console.warn('[SQLite Migration] notification_id check:', err);
+    console.warn('[SQLite Migration] reminders columns check:', err);
   }
 
   try {
@@ -114,7 +130,19 @@ async function initDatabaseSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     if (!settingsCols.some((c) => c.name === 'vibration_enabled')) {
       await db.execAsync('ALTER TABLE reminder_settings ADD COLUMN vibration_enabled INTEGER NOT NULL DEFAULT 1;');
     }
+    if (!settingsCols.some((c) => c.name === 'alarm_mode')) {
+      await db.execAsync('ALTER TABLE reminder_settings ADD COLUMN alarm_mode INTEGER NOT NULL DEFAULT 0;');
+    }
   } catch (err) {
-    console.warn('[SQLite Migration] vibration_enabled check:', err);
+    console.warn('[SQLite Migration] reminder_settings columns check:', err);
+  }
+
+  try {
+    const logCols = await db.getAllAsync<{ name: string }>('PRAGMA table_info(water_logs);');
+    if (!logCols.some((c) => c.name === 'reminder_id')) {
+      await db.execAsync('ALTER TABLE water_logs ADD COLUMN reminder_id TEXT;');
+    }
+  } catch (err) {
+    console.warn('[SQLite Migration] water_logs reminder_id check:', err);
   }
 }

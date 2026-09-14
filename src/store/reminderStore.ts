@@ -1,4 +1,6 @@
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ReminderItem, ReminderMode } from '../types';
 import {
   getRemindersFromDb,
@@ -33,10 +35,12 @@ interface ReminderState {
   soundEnabled: boolean;
   vibrationEnabled: boolean;
   snoozeMinutes: number;
+  alarmMode: boolean;
 
   // Actions
   loadReminders: () => Promise<void>;
   setReminderMode: (mode: ReminderMode) => Promise<void>;
+  setAlarmMode: (enabled: boolean) => Promise<void>;
   updateIntervalSettings: (settings: {
     startTime?: string;
     endTime?: string;
@@ -63,6 +67,7 @@ interface ReminderState {
     soundEnabled?: boolean;
     vibrationEnabled?: boolean;
     snoozeMinutes?: number;
+    alarmMode?: boolean;
   }) => Promise<void>;
   snoozeReminder: (minutes?: number, amountMl?: number) => Promise<string | null>;
   getNextReminderTime: () => string;
@@ -81,66 +86,86 @@ const DEFAULT_INTERVAL_REMINDERS: ReminderItem[] = [
   { id: 'rem-init-8', time: '08:00 PM', amountMl: 250, isEnabled: true },
 ];
 
-export const useReminderStore = create<ReminderState>((set, get) => ({
-  reminderMode: 'interval',
-  startTime: '08:00 AM',
-  endTime: '10:00 PM',
-  intervalMinutes: 60,
-  defaultAmountMl: 250,
-  customReminders: DEFAULT_INTERVAL_REMINDERS,
-  isLoaded: false,
+export const useReminderStore = create<ReminderState>()(
+  persist(
+    (set, get) => ({
+      reminderMode: 'interval',
+      startTime: '08:00 AM',
+      endTime: '10:00 PM',
+      intervalMinutes: 60,
+      defaultAmountMl: 250,
+      customReminders: DEFAULT_INTERVAL_REMINDERS,
+      isLoaded: false,
 
-  notificationsEnabled: true,
-  soundEnabled: true,
-  vibrationEnabled: true,
-  snoozeMinutes: 10,
+      notificationsEnabled: true,
+      soundEnabled: true,
+      vibrationEnabled: true,
+      snoozeMinutes: 10,
+      alarmMode: false,
 
-  loadReminders: async () => {
-    try {
-      const [dbReminders, dbSettings] = await Promise.all([
-        getRemindersFromDb(),
-        getReminderSettingsFromDb(),
-      ]);
+      loadReminders: async () => {
+        try {
+          const [dbReminders, dbSettings] = await Promise.all([
+            getRemindersFromDb(),
+            getReminderSettingsFromDb(),
+          ]);
 
-      const mergedReminders =
-        dbReminders.length > 0 ? dbReminders.sort((a, b) => compareTimes(a.time, b.time)) : get().customReminders;
+          const mergedReminders =
+            dbReminders.length > 0 ? dbReminders.sort((a, b) => compareTimes(a.time, b.time)) : get().customReminders;
 
-      if (dbReminders.length === 0) {
-        // Seed default reminders in SQLite
-        await replaceAllRemindersInDb(mergedReminders, dbSettings?.mode ?? 'interval');
-      }
+          if (dbReminders.length === 0) {
+            // Seed default reminders in SQLite
+            await replaceAllRemindersInDb(mergedReminders, dbSettings?.mode ?? 'interval');
+          }
 
-      const notifEnabled = dbSettings?.enabled ?? get().notificationsEnabled;
-      const sndEnabled = dbSettings?.soundEnabled ?? get().soundEnabled;
-      const vibEnabled = dbSettings?.vibrationEnabled ?? get().vibrationEnabled;
-      const snoozeMins = dbSettings?.snoozeMinutes ?? get().snoozeMinutes;
+          const notifEnabled = dbSettings?.enabled ?? get().notificationsEnabled;
+          const sndEnabled = dbSettings?.soundEnabled ?? get().soundEnabled;
+          const vibEnabled = dbSettings?.vibrationEnabled ?? get().vibrationEnabled;
+          const snoozeMins = dbSettings?.snoozeMinutes ?? get().snoozeMinutes;
+          const alarm = dbSettings?.alarmMode ?? get().alarmMode;
 
-      set({
-        customReminders: mergedReminders,
-        reminderMode: dbSettings?.mode ?? get().reminderMode,
-        startTime: dbSettings?.startTime ?? get().startTime,
-        endTime: dbSettings?.endTime ?? get().endTime,
-        intervalMinutes: dbSettings?.intervalMinutes ?? get().intervalMinutes,
-        defaultAmountMl: dbSettings?.defaultAmountMl ?? get().defaultAmountMl,
-        notificationsEnabled: notifEnabled,
-        soundEnabled: sndEnabled,
-        vibrationEnabled: vibEnabled,
-        snoozeMinutes: snoozeMins,
-        isLoaded: true,
-      });
+          set({
+            customReminders: mergedReminders,
+            reminderMode: dbSettings?.mode ?? get().reminderMode,
+            startTime: dbSettings?.startTime ?? get().startTime,
+            endTime: dbSettings?.endTime ?? get().endTime,
+            intervalMinutes: dbSettings?.intervalMinutes ?? get().intervalMinutes,
+            defaultAmountMl: dbSettings?.defaultAmountMl ?? get().defaultAmountMl,
+            notificationsEnabled: notifEnabled,
+            soundEnabled: sndEnabled,
+            vibrationEnabled: vibEnabled,
+            snoozeMinutes: snoozeMins,
+            alarmMode: alarm,
+            isLoaded: true,
+          });
 
-      // Initialize notifications channels and reconcile without duplicates
-      await notificationService.initializeNotifications(sndEnabled, vibEnabled);
-      await notificationService.reconcileNotifications(mergedReminders, notifEnabled);
-    } catch (error) {
-      console.error('[ReminderStore] Failed to load reminders from SQLite:', error);
-      set({ isLoaded: true });
-    }
-  },
+          // Initialize notifications channels and reconcile without duplicates
+          await notificationService.initializeNotifications(sndEnabled, vibEnabled, alarm);
+          await notificationService.reconcileNotifications(mergedReminders, notifEnabled, alarm);
+        } catch (error) {
+          console.error('[ReminderStore] Failed to load reminders from SQLite:', error);
+          set({ isLoaded: true });
+        }
+      },
 
   setReminderMode: async (mode) => {
     set({ reminderMode: mode });
     await saveReminderSettingsToDb({ mode });
+  },
+
+  setAlarmMode: async (enabled: boolean) => {
+    set({ alarmMode: enabled });
+    await saveReminderSettingsToDb({ alarmMode: enabled });
+    await notificationService.configureNotificationChannels(
+      get().soundEnabled,
+      get().vibrationEnabled,
+      enabled
+    );
+    await notificationService.reconcileNotifications(
+      get().customReminders,
+      get().notificationsEnabled,
+      enabled
+    );
   },
 
   updateIntervalSettings: async (settings) => {
@@ -200,7 +225,7 @@ export const useReminderStore = create<ReminderState>((set, get) => ({
 
     // Reschedule notifications if notifications are enabled
     if (get().notificationsEnabled) {
-      await notificationService.rescheduleAllReminders(sorted);
+      await notificationService.rescheduleAllReminders(sorted, get().alarmMode);
     }
 
     return { success: true, count: sorted.length };
@@ -222,22 +247,38 @@ export const useReminderStore = create<ReminderState>((set, get) => ({
 
     // Android notification sync
     if (newStatus && get().notificationsEnabled) {
-      const notifId = await notificationService.scheduleReminder(
+      const res = await notificationService.scheduleReminder(
         { ...current, isEnabled: true },
-        { soundEnabled: get().soundEnabled, vibrationEnabled: get().vibrationEnabled }
+        {
+          soundEnabled: get().soundEnabled,
+          vibrationEnabled: get().vibrationEnabled,
+          alarmMode: get().alarmMode,
+        }
       );
-      if (notifId) {
+      if (res.notificationId) {
         set({
           customReminders: get().customReminders.map((r) =>
-            r.id === id ? { ...r, notificationId: notifId } : r
+            r.id === id
+              ? {
+                  ...r,
+                  notificationId: res.notificationId,
+                  followUpNotificationId: res.followUpNotificationId,
+                }
+              : r
           ),
         });
       }
     } else {
-      await notificationService.cancelReminder(id, current.notificationId);
+      await notificationService.cancelReminder(
+        id,
+        current.notificationId,
+        current.followUpNotificationId
+      );
       set({
         customReminders: get().customReminders.map((r) =>
-          r.id === id ? { ...r, notificationId: null } : r
+          r.id === id
+            ? { ...r, notificationId: null, followUpNotificationId: null }
+            : r
         ),
       });
     }
@@ -276,11 +317,13 @@ export const useReminderStore = create<ReminderState>((set, get) => ({
 
     // Schedule Android local notification if active
     if (get().notificationsEnabled) {
-      const notifId = await notificationService.scheduleReminder(newReminder, {
+      const res = await notificationService.scheduleReminder(newReminder, {
         soundEnabled: get().soundEnabled,
         vibrationEnabled: get().vibrationEnabled,
+        alarmMode: get().alarmMode,
       });
-      newReminder.notificationId = notifId;
+      newReminder.notificationId = res.notificationId;
+      newReminder.followUpNotificationId = res.followUpNotificationId;
     }
 
     const updated = [...get().customReminders, newReminder].sort((a, b) =>
@@ -322,14 +365,21 @@ export const useReminderStore = create<ReminderState>((set, get) => ({
 
     // Update notification
     if (updatedReminder.isEnabled && get().notificationsEnabled) {
-      const notifId = await notificationService.scheduleReminder(updatedReminder, {
+      const res = await notificationService.scheduleReminder(updatedReminder, {
         soundEnabled: get().soundEnabled,
         vibrationEnabled: get().vibrationEnabled,
+        alarmMode: get().alarmMode,
       });
-      updatedReminder.notificationId = notifId;
+      updatedReminder.notificationId = res.notificationId;
+      updatedReminder.followUpNotificationId = res.followUpNotificationId;
     } else {
-      await notificationService.cancelReminder(updatedReminder.id, updatedReminder.notificationId);
+      await notificationService.cancelReminder(
+        updatedReminder.id,
+        updatedReminder.notificationId,
+        updatedReminder.followUpNotificationId
+      );
       updatedReminder.notificationId = null;
+      updatedReminder.followUpNotificationId = null;
     }
 
     const updated = get().customReminders.map((r) =>
@@ -352,8 +402,12 @@ export const useReminderStore = create<ReminderState>((set, get) => ({
     // SQLite deletion
     await deleteReminderFromDb(id);
 
-    // Cancel notification
-    await notificationService.cancelReminder(id, target?.notificationId);
+    // Cancel notification and follow-up
+    await notificationService.cancelReminder(
+      id,
+      target?.notificationId,
+      target?.followUpNotificationId
+    );
   },
 
   updateNotificationSettings: async (settings) => {
@@ -362,6 +416,7 @@ export const useReminderStore = create<ReminderState>((set, get) => ({
       soundEnabled: settings.soundEnabled ?? get().soundEnabled,
       vibrationEnabled: settings.vibrationEnabled ?? get().vibrationEnabled,
       snoozeMinutes: settings.snoozeMinutes ?? get().snoozeMinutes,
+      alarmMode: settings.alarmMode ?? get().alarmMode,
     };
 
     set(updated);
@@ -371,25 +426,36 @@ export const useReminderStore = create<ReminderState>((set, get) => ({
       soundEnabled: updated.soundEnabled,
       vibrationEnabled: updated.vibrationEnabled,
       snoozeMinutes: updated.snoozeMinutes,
+      alarmMode: updated.alarmMode,
     });
 
-    // Reconfigure channel
-    await notificationService.configureNotificationChannel(
+    // Reconfigure channels
+    await notificationService.configureNotificationChannels(
       updated.soundEnabled,
-      updated.vibrationEnabled
+      updated.vibrationEnabled,
+      updated.alarmMode
     );
 
     if (settings.notificationsEnabled === false) {
       await notificationService.cancelAllReminders();
-    } else if (settings.notificationsEnabled === true) {
-      await notificationService.rescheduleAllReminders(get().customReminders);
+    } else {
+      await notificationService.reconcileNotifications(
+        get().customReminders,
+        updated.notificationsEnabled,
+        updated.alarmMode
+      );
     }
   },
 
   snoozeReminder: async (minutes, amountMl) => {
     const snoozeDuration = minutes ?? get().snoozeMinutes ?? 10;
     const amount = amountMl ?? get().defaultAmountMl ?? 250;
-    return await notificationService.scheduleSnoozeReminder(snoozeDuration, amount);
+    return await notificationService.scheduleSnoozeReminder(
+      snoozeDuration,
+      amount,
+      undefined,
+      get().alarmMode
+    );
   },
 
   getNextReminderTime: () => {
@@ -459,6 +525,7 @@ export const useReminderStore = create<ReminderState>((set, get) => ({
       soundEnabled: true,
       vibrationEnabled: true,
       snoozeMinutes: 10,
+      alarmMode: false,
     });
 
     await replaceAllRemindersInDb(resetList, 'interval');
@@ -472,8 +539,28 @@ export const useReminderStore = create<ReminderState>((set, get) => ({
       soundEnabled: true,
       vibrationEnabled: true,
       snoozeMinutes: 10,
+      alarmMode: false,
     });
 
-    await notificationService.rescheduleAllReminders(resetList);
+    await notificationService.rescheduleAllReminders(resetList, false);
   },
-}));
+}),
+    {
+      name: 'hydroreminder-reminder-storage',
+      storage: createJSONStorage(() => AsyncStorage),
+      partialize: (state) => ({
+        reminderMode: state.reminderMode,
+        startTime: state.startTime,
+        endTime: state.endTime,
+        intervalMinutes: state.intervalMinutes,
+        defaultAmountMl: state.defaultAmountMl,
+        customReminders: state.customReminders,
+        notificationsEnabled: state.notificationsEnabled,
+        soundEnabled: state.soundEnabled,
+        vibrationEnabled: state.vibrationEnabled,
+        snoozeMinutes: state.snoozeMinutes,
+        alarmMode: state.alarmMode,
+      }),
+    }
+  )
+);
