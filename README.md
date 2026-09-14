@@ -1,56 +1,81 @@
-# Welcome to your Expo app 👋
+# HydroReminder 💧
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+> **HydroReminder** is a modern, offline-first personal water tracker and smart reminder Android mobile application built with React Native and Expo.
 
-## Get started
+---
 
-1. Install dependencies
+## 🌟 Key Features
 
+- **Circular Hydration Dial**: Real-time visualization of daily intake against your custom hydration goal.
+- **Quick Logging**: Single-tap volume presets (+100 ml, +200 ml, +250 ml, +500 ml) or custom amounts.
+- **Dual Reminder Engine**:
+  - **Fixed Interval Mode**: Automatically generates chronological reminders from wake time to bedtime with configurable intervals (15m, 30m, 45m, 60m, 90m, 120m).
+  - **Custom Times Mode**: Add, edit, toggle, and delete independent reminders with customized volumes.
+- **100% Offline & Private**: Powered by local SQLite database storage (`expo-sqlite`). No user accounts, cloud dependencies, or internet required.
+- **Hydration History**: 7-day visual progress chart and detailed drink logs.
+- **Customizable**: Set daily water goal, switch measurement units (`ml` / `L`), configure dark/light theme, and adjust sound and notification preferences.
+
+---
+
+## 🛠️ Tech Stack
+
+- **Framework**: [React Native](https://reactnative.dev/) with [Expo](https://expo.dev/)
+- **Navigation**: [Expo Router](https://docs.expo.dev/router/introduction/) (file-based tab routing)
+- **State Management**: [Zustand](https://github.com/pmndrs/zustand)
+- **Local Database**: [Expo SQLite](https://docs.expo.dev/versions/latest/sdk/sqlite/)
+- **Language**: [TypeScript](https://www.typescriptlang.org/)
+- **Target Platform**: Android Phone
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+- Node.js (v18 or higher)
+- npm or yarn
+- Expo Go on your Android phone or Android Studio emulator
+
+### Installation
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/KAVIRAJ-27/Water-Remainder.git
+   cd Water-Remainder
+   ```
+
+2. Install dependencies:
    ```bash
    npm install
    ```
 
-2. Start the app
-
+3. Start the development server:
    ```bash
    npx expo start
    ```
 
-In the output, you'll find options to open the app in a
+4. Scan the QR code using the **Expo Go** app on your Android smartphone.
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+---
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+## 📱 Project Structure
 
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+```text
+src/
+├── app/                  # Expo Router tab routes & layouts
+│   ├── (tabs)/           # Bottom navigation tabs (Home, Reminders, History, Settings)
+│   ├── onboarding.tsx    # First-time user setup
+│   └── _layout.tsx       # Root layout & theme provider
+├── components/           # Reusable UI components & dashboard cards
+├── database/             # SQLite schema, tables & repository operations
+├── services/             # Notification service interfaces
+├── store/                # Zustand stores (user, water, reminders)
+├── types/                # TypeScript interfaces & types
+└── utils/                # Date, time & scheduling utility functions
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+---
 
-### Other setup steps
+## 📄 License
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
-
-## Learn more
-
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+MIT License
