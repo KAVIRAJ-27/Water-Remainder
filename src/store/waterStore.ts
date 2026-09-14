@@ -40,8 +40,8 @@ interface WaterState {
   addWater: (amountMl: number, dailyGoal?: number) => Promise<{ success: boolean; error?: string }>;
   removeWaterLog: (id: string, dailyGoal?: number) => Promise<void>;
   getLogsForSelectedDate: (dateKey: string) => Promise<WaterLog[]>;
-  clearTodayData: () => Promise<void>;
-  clearHistory: () => Promise<void>;
+  clearTodayData: (dailyGoal?: number) => Promise<void>;
+  clearHistory: (dailyGoal?: number) => Promise<void>;
   resetWaterStore: () => Promise<void>;
 }
 
@@ -220,7 +220,7 @@ export const useWaterStore = create<WaterState>((set, get) => ({
     return await getWaterLogsForDateFromDb(dateKey);
   },
 
-  clearTodayData: async () => {
+  clearTodayData: async (dailyGoal: number = 2500) => {
     const todayKey = getTodayDateKey();
     await clearDateLogsInDb(todayKey);
     set({
@@ -228,10 +228,10 @@ export const useWaterStore = create<WaterState>((set, get) => ({
       drinkCount: 0,
       todayLogs: [],
     });
-    await get().loadAnalytics(2500);
+    await get().loadAnalytics(dailyGoal);
   },
 
-  clearHistory: async () => {
+  clearHistory: async (dailyGoal: number = 2500) => {
     // Keeps today's data, clears older days
     const todayKey = getTodayDateKey();
     const all = await getAllDailyTotalsFromDb();
@@ -240,7 +240,7 @@ export const useWaterStore = create<WaterState>((set, get) => ({
         await clearDateLogsInDb(row.dateKey);
       }
     }
-    await get().loadAnalytics(2500);
+    await get().loadAnalytics(dailyGoal);
   },
 
   resetWaterStore: async () => {

@@ -75,6 +75,25 @@ async function initDatabaseSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       date_key TEXT NOT NULL
     );
 
+    -- User settings table (single configuration row)
+    CREATE TABLE IF NOT EXISTS user_settings (
+      id INTEGER PRIMARY KEY NOT NULL DEFAULT 1,
+      name TEXT NOT NULL DEFAULT 'Kaviraj',
+      daily_goal_ml INTEGER NOT NULL DEFAULT 2500,
+      unit TEXT NOT NULL DEFAULT 'ml',
+      default_amount_ml INTEGER NOT NULL DEFAULT 250,
+      theme_mode TEXT NOT NULL DEFAULT 'system',
+      onboarding_completed INTEGER NOT NULL DEFAULT 0,
+      updated_at INTEGER NOT NULL DEFAULT 0
+    );
+
+    -- Seed default user settings if empty
+    INSERT OR IGNORE INTO user_settings (
+      id, name, daily_goal_ml, unit, default_amount_ml, theme_mode, onboarding_completed, updated_at
+    ) VALUES (
+      1, 'Kaviraj', 2500, 'ml', 250, 'system', 0, 0
+    );
+
     CREATE INDEX IF NOT EXISTS idx_water_logs_date ON water_logs(date_key);
     CREATE INDEX IF NOT EXISTS idx_water_logs_date_ts ON water_logs(date_key, timestamp DESC);
     CREATE INDEX IF NOT EXISTS idx_reminders_enabled ON reminders(enabled);

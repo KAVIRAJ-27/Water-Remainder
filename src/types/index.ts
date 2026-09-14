@@ -10,6 +10,7 @@ export interface UserProfile {
   unit: UnitPreference;
   startTime: string; // e.g. "08:00 AM"
   endTime: string; // e.g. "10:00 PM"
+  defaultAmountMl: number; // e.g. 250
   onboardingCompleted: boolean;
   currentStreak: number;
 }

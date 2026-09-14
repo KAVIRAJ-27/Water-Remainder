@@ -66,6 +66,7 @@ interface ReminderState {
   }) => Promise<void>;
   snoozeReminder: (minutes?: number, amountMl?: number) => Promise<string | null>;
   getNextReminderTime: () => string;
+  getNextReminderItem: () => ReminderItem | null;
   resetSchedule: () => Promise<void>;
 }
 
@@ -419,6 +420,30 @@ export const useReminderStore = create<ReminderState>((set, get) => ({
 
     // If all reminders for today have passed, return first one tomorrow
     return `${activeReminders[0].time} (Tomorrow)`;
+  },
+
+  getNextReminderItem: () => {
+    const state = get();
+    if (!state.notificationsEnabled) {
+      return null;
+    }
+
+    const activeReminders = state.customReminders
+      .filter((r) => r.isEnabled)
+      .sort((a, b) => compareTimes(a.time, b.time));
+
+    if (activeReminders.length === 0) {
+      return null;
+    }
+
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+    const upcoming = activeReminders.find(
+      (r) => parseTimeToMinutes(r.time) > currentMinutes
+    );
+
+    return upcoming || activeReminders[0];
   },
 
   resetSchedule: async () => {

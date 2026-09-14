@@ -24,6 +24,11 @@ export default function RootLayout() {
     () => false
   );
 
+  // Hydrate user settings from SQLite on initial load
+  useEffect(() => {
+    useUserStore.getState().loadUserSettings();
+  }, []);
+
   // Handle routing based on onboarding status
   useEffect(() => {
     if (!hasHydrated) return;

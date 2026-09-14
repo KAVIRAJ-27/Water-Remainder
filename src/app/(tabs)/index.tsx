@@ -21,6 +21,7 @@ import { QuickAddModal } from '../../components/dashboard/QuickAddModal';
 import { PrimaryButton } from '../../components/PrimaryButton';
 import { BorderRadius, Shadows, Spacing } from '../../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
+import { formatVolume } from '../../utils/unitUtils';
 
 export default function HomeScreen() {
   const { colors, isDark } = useTheme();
@@ -208,12 +209,31 @@ export default function HomeScreen() {
           </View>
 
           {/* Dedicated Primary Add Water Button */}
-          <View style={{ marginTop: 12 }}>
-            <PrimaryButton
-              title="Add Custom Water"
-              icon="add-circle"
-              onPress={() => setModalVisible(true)}
-            />
+          <View style={{ marginTop: 12, flexDirection: 'row', gap: 10 }}>
+            <View style={{ flex: 1.3 }}>
+              <PrimaryButton
+                title={`+ Add Default (${formatVolume(user.defaultAmountMl || 250, user.unit)})`}
+                icon="water"
+                onPress={() => handleQuickAdd(user.defaultAmountMl || 250)}
+              />
+            </View>
+            <View style={{ flex: 0.9 }}>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={() => setModalVisible(true)}
+                style={[
+                  styles.customAddButton,
+                  {
+                    backgroundColor: colors.surfaceElevated,
+                    borderColor: colors.border,
+                  },
+                ]}
+                accessibilityLabel="Add custom water amount"
+              >
+                <Ionicons name="add" size={18} color={colors.primary} />
+                <Text style={[styles.customAddButtonText, { color: colors.text }]}>Custom</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
 
@@ -445,5 +465,19 @@ const styles = StyleSheet.create({
   },
   logTime: {
     fontSize: 11,
+  },
+  customAddButton: {
+    height: 48,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingHorizontal: Spacing.sm,
+  },
+  customAddButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

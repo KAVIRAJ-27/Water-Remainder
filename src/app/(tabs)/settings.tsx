@@ -1,8 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
   ScrollView,
@@ -10,20 +9,23 @@ import {
   Alert,
   Modal,
   TouchableWithoutFeedback,
-  KeyboardAvoidingView,
-  Platform,
   Linking,
 } from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
+import Constants from 'expo-constants';
 import { useTheme } from '../../hooks/useTheme';
 import { useUserStore } from '../../store/userStore';
 import { useWaterStore } from '../../store/waterStore';
 import { useReminderStore } from '../../store/reminderStore';
 import { SettingRow } from '../../components/SettingRow';
+import { DailyGoalModal } from '../../components/settings/DailyGoalModal';
+import { DefaultAmountModal } from '../../components/settings/DefaultAmountModal';
+import { EditProfileModal } from '../../components/settings/EditProfileModal';
 import { BorderRadius, Shadows, Spacing } from '../../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { ThemeMode, UnitPreference } from '../../types';
-import { useRouter } from 'expo-router';
 import { notificationService } from '../../services/notificationService';
+import { formatVolume } from '../../utils/unitUtils';
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -34,6 +36,8 @@ export default function SettingsScreen() {
     name,
     dailyGoal,
     unit,
+    defaultAmountMl,
+    loadUserSettings,
     updateProfile,
     resetUser,
   } = useUserStore();
@@ -45,6 +49,8 @@ export default function SettingsScreen() {
     clearTodayData,
     clearHistory,
     resetWaterStore,
+    loadTodayData,
+    loadAnalytics,
   } = useWaterStore();
 
   // Reminder store
@@ -52,73 +58,83 @@ export default function SettingsScreen() {
     startTime,
     endTime,
     intervalMinutes,
-    defaultAmountMl,
+    reminderMode,
     notificationsEnabled,
     soundEnabled,
     vibrationEnabled,
     snoozeMinutes,
     updateIntervalSettings,
     updateNotificationSettings,
+    getNextReminderItem,
     resetSchedule,
   } = useReminderStore();
 
   const [systemPermissionGranted, setSystemPermissionGranted] = useState(true);
 
-  useEffect(() => {
-    notificationService.getPermissionStatus().then((status) => {
-      setSystemPermissionGranted(status === 'granted');
-    });
+  // Check Android notification permission on mount and focus
+  const checkPermission = useCallback(async () => {
+    const status = await notificationService.getPermissionStatus();
+    setSystemPermissionGranted(status === 'granted');
   }, []);
 
-  // Edit Goal Modal State
-  const [goalModalVisible, setGoalModalVisible] = useState(false);
-  const [tempGoalText, setTempGoalText] = useState(dailyGoal.toString());
+  useEffect(() => {
+    loadUserSettings();
+  }, [loadUserSettings]);
 
-  // Edit Name Modal State
+  useFocusEffect(
+    useCallback(() => {
+      checkPermission();
+    }, [checkPermission])
+  );
+
+  // Modals
   const [nameModalVisible, setNameModalVisible] = useState(false);
-  const [tempNameText, setTempNameText] = useState(name);
-
-  // Edit Interval Modal State
+  const [goalModalVisible, setGoalModalVisible] = useState(false);
+  const [amountModalVisible, setAmountModalVisible] = useState(false);
   const [intervalModalVisible, setIntervalModalVisible] = useState(false);
 
-  const handleSaveName = () => {
-    if (!tempNameText.trim()) {
-      Alert.alert('Invalid Name', 'Name cannot be empty.');
-      return;
-    }
-    updateProfile({ name: tempNameText.trim() });
-    setNameModalVisible(false);
+  // Handlers
+  const handleSaveName = async (newName: string) => {
+    await updateProfile({ name: newName });
   };
 
-  const handleSaveGoal = () => {
-    const parsed = parseFloat(tempGoalText.trim());
-    if (isNaN(parsed) || parsed <= 0) {
-      Alert.alert('Invalid Goal', 'Please enter a goal greater than 0.');
-      return;
-    }
-    const finalGoal = unit === 'L' ? Math.round(parsed * 1000) : Math.round(parsed);
-    updateProfile({ dailyGoal: finalGoal });
-    setGoalModalVisible(false);
+  const handleSaveGoal = async (newGoalMl: number) => {
+    await updateProfile({ dailyGoal: newGoalMl });
+    await loadTodayData(newGoalMl);
+    await loadAnalytics(newGoalMl);
   };
 
-  const handleToggleUnit = () => {
+  const handleToggleUnit = async () => {
     const newUnit: UnitPreference = unit === 'ml' ? 'L' : 'ml';
-    updateProfile({ unit: newUnit });
+    await updateProfile({ unit: newUnit });
   };
+
+  const handleSaveDefaultAmount = async (newAmountMl: number) => {
+    await updateProfile({ defaultAmountMl: newAmountMl });
+    await updateIntervalSettings({ defaultAmountMl: newAmountMl });
+  };
+
+  // Next reminder live preview
+  const nextReminder = getNextReminderItem();
+  const nextReminderText = !notificationsEnabled
+    ? 'Reminders Disabled'
+    : nextReminder
+    ? `${nextReminder.time} (${formatVolume(nextReminder.amountMl, unit)})`
+    : 'No upcoming reminders';
 
   // Destructive Action Handlers
   const handleClearTodayData = () => {
     Alert.alert(
-      "Clear Today's Data",
-      "Are you sure you want to reset today's logged drinks to 0 ml? This cannot be undone.",
+      "Clear Today's Data?",
+      "This will remove all water entries recorded today. Your settings, reminders, and past history will be kept.",
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Clear Data',
           style: 'destructive',
-          onPress: () => {
-            clearTodayData();
-            Alert.alert('Cleared', "Today's hydration data has been reset.");
+          onPress: async () => {
+            await clearTodayData(dailyGoal);
+            Alert.alert('Cleared', "Today's hydration data has been reset to 0.");
           },
         },
       ]
@@ -127,15 +143,15 @@ export default function SettingsScreen() {
 
   const handleClearHistory = () => {
     Alert.alert(
-      'Clear Hydration History',
-      'Are you sure you want to clear past daily records? Today will be kept.',
+      'Clear Hydration History?',
+      'This will permanently remove your past water history. Today\'s current progress and personal settings will not be changed.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Clear History',
           style: 'destructive',
-          onPress: () => {
-            clearHistory();
+          onPress: async () => {
+            await clearHistory(dailyGoal);
             Alert.alert('Cleared', 'Past hydration history has been cleared.');
           },
         },
@@ -145,17 +161,18 @@ export default function SettingsScreen() {
 
   const handleResetApp = () => {
     Alert.alert(
-      'Reset HydroReminder',
-      'This will reset your profile, reminders, and all hydration history back to factory defaults. You will return to the setup screen.',
+      'Reset HydroReminder?',
+      'This will delete your hydration data, reminders, and personal settings. All scheduled notifications will be cancelled and you will return to the setup screen.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Reset Everything',
           style: 'destructive',
-          onPress: () => {
-            resetUser();
-            resetWaterStore();
-            resetSchedule();
+          onPress: async () => {
+            await notificationService.cancelAllReminders();
+            await resetUser();
+            await resetWaterStore();
+            await resetSchedule();
             router.replace('/onboarding');
           },
         },
@@ -168,6 +185,8 @@ export default function SettingsScreen() {
     { mode: 'light', label: 'Light', icon: 'sunny-outline' },
     { mode: 'dark', label: 'Dark', icon: 'moon-outline' },
   ];
+
+  const appVersion = Constants.expoConfig?.version || '1.0.0';
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
@@ -200,34 +219,50 @@ export default function SettingsScreen() {
               title="Name"
               subtitle="Your display name"
               valueText={name}
-              onPress={() => {
-                setTempNameText(name);
-                setNameModalVisible(true);
-              }}
-            />
-
-            <SettingRow
-              icon="flag-outline"
-              title="Daily Goal"
-              subtitle="Hydration target"
-              valueText={unit === 'L' ? `${(dailyGoal / 1000).toFixed(1)} L` : `${dailyGoal} ml`}
-              onPress={() => {
-                setTempGoalText(unit === 'L' ? (dailyGoal / 1000).toFixed(1) : dailyGoal.toString());
-                setGoalModalVisible(true);
-              }}
-            />
-
-            <SettingRow
-              icon="swap-horizontal-outline"
-              title="Unit"
-              subtitle="Toggle between ml and L"
-              valueText={unit === 'ml' ? 'Milliliters (ml)' : 'Liters (L)'}
-              onPress={handleToggleUnit}
+              onPress={() => setNameModalVisible(true)}
             />
           </View>
         </View>
 
-        {/* 2. STREAKS & ACHIEVEMENTS */}
+        {/* 2. HYDRATION SETTINGS */}
+        <View style={styles.sectionWrap}>
+          <Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>
+            HYDRATION
+          </Text>
+          <View
+            style={[
+              styles.sectionCard,
+              { backgroundColor: colors.card, borderColor: colors.border },
+              Shadows.sm,
+            ]}
+          >
+            <SettingRow
+              icon="flag-outline"
+              title="Daily Water Goal"
+              subtitle="Target volume per day"
+              valueText={formatVolume(dailyGoal, unit)}
+              onPress={() => setGoalModalVisible(true)}
+            />
+
+            <SettingRow
+              icon="swap-horizontal-outline"
+              title="Water Unit"
+              subtitle="Display unit for all volumes"
+              valueText={unit === 'ml' ? 'Milliliters (ml)' : 'Liters (L)'}
+              onPress={handleToggleUnit}
+            />
+
+            <SettingRow
+              icon="water-outline"
+              title="Default Drink Amount"
+              subtitle="Quick-add single portion"
+              valueText={formatVolume(defaultAmountMl || 250, unit)}
+              onPress={() => setAmountModalVisible(true)}
+            />
+          </View>
+        </View>
+
+        {/* 3. STREAKS & ACHIEVEMENTS */}
         <View style={styles.sectionWrap}>
           <Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>
             STREAKS & ACHIEVEMENTS
@@ -242,19 +277,19 @@ export default function SettingsScreen() {
             <SettingRow
               icon="flame-outline"
               title="Current Streak"
-              subtitle="Consecutive goal days"
+              subtitle="Consecutive completed days"
               valueText={`${currentStreak} ${currentStreak === 1 ? 'day' : 'days'} 🔥`}
             />
             <SettingRow
               icon="trophy-outline"
               title="Longest Streak"
-              subtitle="Personal best record"
+              subtitle="All-time personal record"
               valueText={`${longestStreak} ${longestStreak === 1 ? 'day' : 'days'} 🏆`}
             />
           </View>
         </View>
 
-        {/* 3. REMINDERS SECTION */}
+        {/* 4. REMINDERS SECTION */}
         <View style={styles.sectionWrap}>
           <Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>
             REMINDERS
@@ -267,7 +302,23 @@ export default function SettingsScreen() {
             ]}
           >
             <SettingRow
+              icon="notifications-outline"
+              title="Enable Reminders"
+              subtitle="Active water scheduling"
+              isSwitch
+              switchValue={notificationsEnabled}
+              onSwitchChange={(val) => updateNotificationSettings({ notificationsEnabled: val })}
+            />
+
+            <SettingRow
               icon="time-outline"
+              title="Next Reminder"
+              subtitle="Upcoming scheduled alert"
+              valueText={nextReminderText}
+            />
+
+            <SettingRow
+              icon="calendar-outline"
               title="Reminder Schedule"
               subtitle="Active daily window"
               valueText={`${startTime} - ${endTime}`}
@@ -283,19 +334,16 @@ export default function SettingsScreen() {
             />
 
             <SettingRow
-              icon="water-outline"
-              title="Default Amount"
-              subtitle="Standard single drink"
-              valueText={`${defaultAmountMl} ml`}
-              onPress={() => {
-                const nextAmount = defaultAmountMl === 250 ? 300 : defaultAmountMl === 300 ? 500 : 250;
-                updateIntervalSettings({ defaultAmountMl: nextAmount });
-              }}
+              icon="options-outline"
+              title="Reminder Mode"
+              subtitle="Schedule behavior"
+              valueText={reminderMode === 'interval' ? 'Fixed Interval' : 'Custom Times'}
+              onPress={() => router.push('/(tabs)/reminders' as any)}
             />
           </View>
         </View>
 
-        {/* 3. NOTIFICATIONS SECTION */}
+        {/* 5. NOTIFICATIONS SECTION */}
         <View style={styles.sectionWrap}>
           <Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>
             NOTIFICATIONS
@@ -314,14 +362,15 @@ export default function SettingsScreen() {
               <Ionicons name="alert-circle-outline" size={22} color={colors.warning} />
               <View style={{ flex: 1 }}>
                 <Text style={[styles.permissionNoticeTitle, { color: colors.warning }]}>
-                  Notifications are disabled in Android settings.
+                  Notifications are disabled by Android.
                 </Text>
                 <Text style={[styles.permissionNoticeBody, { color: colors.textSecondary }]}>
-                  Enable notifications to receive scheduled water alerts on your device.
+                  Enable notifications in Android system settings to receive your scheduled drink alerts.
                 </Text>
                 <TouchableOpacity
                   style={[styles.openSettingsBtn, { backgroundColor: colors.warning }]}
                   onPress={() => Linking.openSettings()}
+                  accessibilityLabel="Open Android notification settings"
                 >
                   <Text style={styles.openSettingsBtnText}>Open Notification Settings</Text>
                 </TouchableOpacity>
@@ -337,18 +386,9 @@ export default function SettingsScreen() {
             ]}
           >
             <SettingRow
-              icon="notifications-outline"
-              title="Enable Notifications"
-              subtitle="Drink alerts on your device"
-              isSwitch
-              switchValue={notificationsEnabled}
-              onSwitchChange={(val) => updateNotificationSettings({ notificationsEnabled: val })}
-            />
-
-            <SettingRow
               icon="volume-high-outline"
               title="Sound"
-              subtitle="Audible chime when reminding"
+              subtitle="Audible chime on reminder"
               isSwitch
               switchValue={soundEnabled}
               onSwitchChange={(val) => updateNotificationSettings({ soundEnabled: val })}
@@ -365,7 +405,7 @@ export default function SettingsScreen() {
 
             <SettingRow
               icon="hourglass-outline"
-              title="Snooze"
+              title="Snooze Duration"
               subtitle="Delay reminder duration"
               valueText={`${snoozeMinutes} mins`}
               onPress={() => {
@@ -376,10 +416,10 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        {/* 4. BATTERY OPTIMIZATION & RELIABILITY */}
+        {/* 6. BATTERY & RELIABILITY GUIDE */}
         <View style={styles.sectionWrap}>
           <Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>
-            BATTERY OPTIMIZATION & RELIABILITY
+            BATTERY & RELIABILITY
           </Text>
           <View
             style={[
@@ -395,25 +435,19 @@ export default function SettingsScreen() {
               </Text>
             </View>
             <Text style={[styles.batteryHelpText, { color: colors.textSecondary }]}>
-              Some Android manufacturers (e.g. Samsung, Xiaomi, OnePlus) aggressively restrict background tasks, which can delay or block scheduled reminders.
+              Some Android manufacturers (e.g. Samsung, Xiaomi, OnePlus) aggressively restrict background tasks, which can delay scheduled reminders.
             </Text>
             <View style={styles.batteryTipList}>
               <View style={styles.batteryTipRow}>
                 <Ionicons name="checkmark-circle" size={16} color={colors.success} />
                 <Text style={[styles.batteryTipText, { color: colors.text }]}>
-                  {'Set battery usage to "Unrestricted" in App Info.'}
+                  {'Set battery usage to "Unrestricted" in Android App Info.'}
                 </Text>
               </View>
               <View style={styles.batteryTipRow}>
                 <Ionicons name="checkmark-circle" size={16} color={colors.success} />
                 <Text style={[styles.batteryTipText, { color: colors.text }]}>
                   Allow background activity for HydroReminder.
-                </Text>
-              </View>
-              <View style={styles.batteryTipRow}>
-                <Ionicons name="checkmark-circle" size={16} color={colors.success} />
-                <Text style={[styles.batteryTipText, { color: colors.text }]}>
-                  Exclude HydroReminder from battery savers.
                 </Text>
               </View>
             </View>
@@ -429,7 +463,7 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        {/* 5. APPEARANCE SECTION */}
+        {/* 7. APPEARANCE SECTION */}
         <View style={styles.sectionWrap}>
           <Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>
             APPEARANCE
@@ -461,6 +495,7 @@ export default function SettingsScreen() {
                             borderColor: colors.border,
                           },
                     ]}
+                    accessibilityLabel={`Theme option ${opt.label}`}
                   >
                     <Ionicons
                       name={opt.icon}
@@ -482,10 +517,10 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        {/* 5. DATA SECTION */}
+        {/* 8. DATA MANAGEMENT SECTION */}
         <View style={styles.sectionWrap}>
           <Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>
-            DATA
+            DATA MANAGEMENT
           </Text>
           <View
             style={[
@@ -520,10 +555,47 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        {/* App Version Info */}
+        {/* 9. ABOUT & PRIVACY SECTION */}
+        <View style={styles.sectionWrap}>
+          <Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>
+            ABOUT & PRIVACY
+          </Text>
+          <View
+            style={[
+              styles.sectionCard,
+              { backgroundColor: colors.card, borderColor: colors.border, padding: Spacing.md },
+              Shadows.sm,
+            ]}
+          >
+            <View style={styles.aboutHeader}>
+              <View style={[styles.aboutLogoBadge, { backgroundColor: colors.primary + '18' }]}>
+                <Ionicons name="water" size={24} color={colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.aboutAppName, { color: colors.text }]}>HydroReminder</Text>
+                <Text style={[styles.aboutVersion, { color: colors.textSecondary }]}>
+                  Version {appVersion} (Android Phone Edition)
+                </Text>
+              </View>
+            </View>
+
+            <Text style={[styles.aboutDescription, { color: colors.textSecondary }]}>
+              A simple offline water reminder and hydration tracking app designed for daily wellness.
+            </Text>
+
+            <View style={[styles.privacyBox, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+              <Ionicons name="shield-checkmark-outline" size={18} color={colors.success} />
+              <Text style={[styles.privacyText, { color: colors.textSecondary }]}>
+                Your hydration data is stored locally on this device. HydroReminder operates 100% offline and never transmits personal or health information to any server or cloud service.
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Footer */}
         <View style={styles.versionFooter}>
           <Text style={[styles.versionText, { color: colors.textMuted }]}>
-            HydroReminder v1.0.0 (Offline-First Android App)
+            HydroReminder • 100% Local & Offline
           </Text>
           <Text style={[styles.versionSub, { color: colors.textMuted }]}>
             com.hydroreminder.app
@@ -532,127 +604,30 @@ export default function SettingsScreen() {
       </ScrollView>
 
       {/* Edit Name Modal */}
-      <Modal
+      <EditProfileModal
         visible={nameModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setNameModalVisible(false)}
-      >
-        <TouchableWithoutFeedback onPress={() => setNameModalVisible(false)}>
-          <View style={styles.modalOverlay}>
-            <KeyboardAvoidingView
-              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-              style={styles.modalWrap}
-            >
-              <TouchableWithoutFeedback>
-                <View
-                  style={[
-                    styles.modalBox,
-                    { backgroundColor: colors.card, borderColor: colors.border },
-                    Shadows.lg,
-                  ]}
-                >
-                  <Text style={[styles.modalTitle, { color: colors.text }]}>Edit Name</Text>
-                  <TextInput
-                    style={[
-                      styles.modalInput,
-                      {
-                        backgroundColor: colors.surfaceElevated,
-                        color: colors.text,
-                        borderColor: colors.border,
-                      },
-                    ]}
-                    value={tempNameText}
-                    onChangeText={setTempNameText}
-                    placeholder="Your name"
-                    placeholderTextColor={colors.textMuted}
-                    autoFocus
-                  />
-                  <View style={styles.modalButtons}>
-                    <TouchableOpacity
-                      onPress={() => setNameModalVisible(false)}
-                      style={[styles.btnCancel, { borderColor: colors.border }]}
-                    >
-                      <Text style={[styles.btnCancelText, { color: colors.textSecondary }]}>
-                        Cancel
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={handleSaveName}
-                      style={[styles.btnSave, { backgroundColor: colors.primary }]}
-                    >
-                      <Text style={styles.btnSaveText}>Save</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              </TouchableWithoutFeedback>
-            </KeyboardAvoidingView>
-          </View>
-        </TouchableWithoutFeedback>
-      </Modal>
+        currentName={name}
+        onClose={() => setNameModalVisible(false)}
+        onSave={handleSaveName}
+      />
 
-      {/* Edit Goal Modal */}
-      <Modal
+      {/* Edit Daily Goal Modal */}
+      <DailyGoalModal
         visible={goalModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setGoalModalVisible(false)}
-      >
-        <TouchableWithoutFeedback onPress={() => setGoalModalVisible(false)}>
-          <View style={styles.modalOverlay}>
-            <KeyboardAvoidingView
-              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-              style={styles.modalWrap}
-            >
-              <TouchableWithoutFeedback>
-                <View
-                  style={[
-                    styles.modalBox,
-                    { backgroundColor: colors.card, borderColor: colors.border },
-                    Shadows.lg,
-                  ]}
-                >
-                  <Text style={[styles.modalTitle, { color: colors.text }]}>
-                    Edit Daily Target ({unit})
-                  </Text>
-                  <TextInput
-                    style={[
-                      styles.modalInput,
-                      {
-                        backgroundColor: colors.surfaceElevated,
-                        color: colors.text,
-                        borderColor: colors.border,
-                      },
-                    ]}
-                    value={tempGoalText}
-                    onChangeText={setTempGoalText}
-                    placeholder={unit === 'L' ? '2.5' : '2500'}
-                    placeholderTextColor={colors.textMuted}
-                    keyboardType="numeric"
-                    autoFocus
-                  />
-                  <View style={styles.modalButtons}>
-                    <TouchableOpacity
-                      onPress={() => setGoalModalVisible(false)}
-                      style={[styles.btnCancel, { borderColor: colors.border }]}
-                    >
-                      <Text style={[styles.btnCancelText, { color: colors.textSecondary }]}>
-                        Cancel
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={handleSaveGoal}
-                      style={[styles.btnSave, { backgroundColor: colors.primary }]}
-                    >
-                      <Text style={styles.btnSaveText}>Save</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              </TouchableWithoutFeedback>
-            </KeyboardAvoidingView>
-          </View>
-        </TouchableWithoutFeedback>
-      </Modal>
+        currentGoalMl={dailyGoal}
+        unit={unit}
+        onClose={() => setGoalModalVisible(false)}
+        onSave={handleSaveGoal}
+      />
+
+      {/* Edit Default Amount Modal */}
+      <DefaultAmountModal
+        visible={amountModalVisible}
+        currentAmountMl={defaultAmountMl || 250}
+        unit={unit}
+        onClose={() => setAmountModalVisible(false)}
+        onSave={handleSaveDefaultAmount}
+      />
 
       {/* Interval Selector Modal */}
       <Modal
@@ -690,6 +665,7 @@ export default function SettingsScreen() {
                           borderColor: isSelected ? colors.primary : colors.border,
                         },
                       ]}
+                      accessibilityLabel={`Every ${mins} minutes`}
                     >
                       <Text
                         style={[
@@ -717,7 +693,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: Spacing.md,
-    paddingBottom: Spacing.xxl + 20,
+    paddingBottom: Spacing.xxl + 24,
     gap: Spacing.md,
   },
   header: {
@@ -763,6 +739,46 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
   },
+  aboutHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 8,
+  },
+  aboutLogoBadge: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  aboutAppName: {
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  aboutVersion: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  aboutDescription: {
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 10,
+  },
+  privacyBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    padding: Spacing.sm + 2,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+  },
+  privacyText: {
+    flex: 1,
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: '500',
+  },
   versionFooter: {
     alignItems: 'center',
     marginTop: Spacing.sm,
@@ -777,14 +793,10 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(0,0,0,0.55)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: Spacing.md,
-  },
-  modalWrap: {
-    width: '100%',
-    maxWidth: 340,
   },
   modalBox: {
     width: '100%',
@@ -797,43 +809,6 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '700',
     marginBottom: Spacing.md,
-  },
-  modalInput: {
-    height: 48,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    paddingHorizontal: Spacing.md,
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: Spacing.md,
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  btnCancel: {
-    flex: 1,
-    height: 44,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  btnCancelText: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  btnSave: {
-    flex: 1.2,
-    height: 44,
-    borderRadius: BorderRadius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  btnSaveText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '700',
   },
   intervalOption: {
     paddingVertical: 12,
