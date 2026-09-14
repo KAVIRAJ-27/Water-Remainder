@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   Alert,
 } from 'react-native';
+import { useFocusEffect } from 'expo-router';
 import { useTheme } from '../../hooks/useTheme';
 import { useUserStore } from '../../store/userStore';
 import { useWaterStore } from '../../store/waterStore';
@@ -26,7 +27,15 @@ export default function HomeScreen() {
 
   // Stores
   const user = useUserStore();
-  const { todayConsumed, drinkCount, todayLogs, addWater, removeWaterLog } = useWaterStore();
+  const {
+    todayConsumed,
+    drinkCount,
+    todayLogs,
+    currentStreak,
+    loadTodayData,
+    addWater,
+    removeWaterLog,
+  } = useWaterStore();
   const { getNextReminderTime, isLoaded, loadReminders } = useReminderStore();
 
   useEffect(() => {
@@ -34,6 +43,12 @@ export default function HomeScreen() {
       loadReminders();
     }
   }, [isLoaded, loadReminders]);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      loadTodayData(user.dailyGoal);
+    }, [user.dailyGoal, loadTodayData])
+  );
 
   const nextReminderTime = getNextReminderTime();
 
@@ -48,8 +63,8 @@ export default function HomeScreen() {
       ? 'Good Afternoon 👋'
       : 'Good Evening 👋';
 
-  const handleQuickAdd = (amountMl: number) => {
-    const res = addWater(amountMl);
+  const handleQuickAdd = async (amountMl: number) => {
+    const res = await addWater(amountMl, user.dailyGoal);
     if (!res.success && res.error) {
       Alert.alert('Validation Error', res.error);
     }
@@ -64,7 +79,9 @@ export default function HomeScreen() {
         {
           text: 'Remove',
           style: 'destructive',
-          onPress: () => removeWaterLog(id),
+          onPress: async () => {
+            await removeWaterLog(id, user.dailyGoal);
+          },
         },
       ]
     );
@@ -136,7 +153,7 @@ export default function HomeScreen() {
           intakeMl={todayConsumed}
           goalMl={user.dailyGoal}
           drinkCount={drinkCount}
-          currentStreak={user.currentStreak}
+          currentStreak={currentStreak}
           unit={user.unit}
         />
 

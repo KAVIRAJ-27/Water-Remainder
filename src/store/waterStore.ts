@@ -1,219 +1,260 @@
 import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { WaterLog, DailyHistoryRecord } from '../types';
-
-export const getTodayDateKey = (): string => {
-  const d = new Date();
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
-
-const INITIAL_HISTORY: DailyHistoryRecord[] = [
-  {
-    id: 'hist-1',
-    dayLabel: 'Today',
-    dateKey: getTodayDateKey(),
-    consumedMl: 1500,
-    goalMl: 2500,
-    percentage: 60,
-  },
-  {
-    id: 'hist-2',
-    dayLabel: 'Yesterday',
-    dateKey: '2026-09-13',
-    consumedMl: 2600,
-    goalMl: 2500,
-    percentage: 104,
-  },
-  {
-    id: 'hist-3',
-    dayLabel: 'Saturday',
-    dateKey: '2026-09-12',
-    consumedMl: 2300,
-    goalMl: 2500,
-    percentage: 92,
-  },
-  {
-    id: 'hist-4',
-    dayLabel: 'Friday',
-    dateKey: '2026-09-11',
-    consumedMl: 2500,
-    goalMl: 2500,
-    percentage: 100,
-  },
-  {
-    id: 'hist-5',
-    dayLabel: 'Thursday',
-    dateKey: '2026-09-10',
-    consumedMl: 1900,
-    goalMl: 2500,
-    percentage: 76,
-  },
-  {
-    id: 'hist-6',
-    dayLabel: 'Wednesday',
-    dateKey: '2026-09-09',
-    consumedMl: 2400,
-    goalMl: 2500,
-    percentage: 96,
-  },
-  {
-    id: 'hist-7',
-    dayLabel: 'Tuesday',
-    dateKey: '2026-09-08',
-    consumedMl: 2700,
-    goalMl: 2500,
-    percentage: 108,
-  },
-];
-
-const INITIAL_LOGS: WaterLog[] = [
-  {
-    id: 'log-1',
-    amountMl: 500,
-    timestamp: Date.now() - 3 * 3600 * 1000,
-    dateKey: getTodayDateKey(),
-  },
-  {
-    id: 'log-2',
-    amountMl: 500,
-    timestamp: Date.now() - 2 * 3600 * 1000,
-    dateKey: getTodayDateKey(),
-  },
-  {
-    id: 'log-3',
-    amountMl: 500,
-    timestamp: Date.now() - 45 * 60 * 1000,
-    dateKey: getTodayDateKey(),
-  },
-];
+import { WaterLog } from '../types';
+import {
+  insertWaterLogInDb,
+  deleteWaterLogInDb,
+  clearDateLogsInDb,
+  clearAllWaterLogsInDb,
+  getTodaySummaryFromDb,
+  getDailyTotalsRangeFromDb,
+  getAllDailyTotalsFromDb,
+  getWaterLogsForDateFromDb,
+} from '../database/waterRepo';
+import { getTodayDateKey, getWeekDates, getLastNDaysDateKeys, formatDateKeyToDisplay } from '../utils/dateUtils';
+import {
+  calculateCurrentStreak,
+  calculateLongestStreak,
+  calculateWeeklyAverage,
+  calculateBestDay,
+  BestDayInfo,
+  DailyDataPoint,
+} from '../services/hydrationAnalytics';
 
 interface WaterState {
   todayConsumed: number;
   drinkCount: number;
   todayLogs: WaterLog[];
-  weeklyHistory: DailyHistoryRecord[];
+  isLoaded: boolean;
 
-  addWater: (amountMl: number) => { success: boolean; error?: string };
-  removeWaterLog: (id: string) => void;
-  clearTodayData: () => void;
-  clearHistory: () => void;
-  resetWaterStore: () => void;
+  // Analytics cache
+  currentStreak: number;
+  longestStreak: number;
+  weeklyAverage: number;
+  bestDay: BestDayInfo | null;
+  weeklyChartDays: DailyDataPoint[];
+  historyRecords: DailyDataPoint[];
+
+  // Actions
+  loadTodayData: (dailyGoal?: number) => Promise<void>;
+  loadAnalytics: (dailyGoal: number, filterDays?: number) => Promise<void>;
+  addWater: (amountMl: number, dailyGoal?: number) => Promise<{ success: boolean; error?: string }>;
+  removeWaterLog: (id: string, dailyGoal?: number) => Promise<void>;
+  getLogsForSelectedDate: (dateKey: string) => Promise<WaterLog[]>;
+  clearTodayData: () => Promise<void>;
+  clearHistory: () => Promise<void>;
+  resetWaterStore: () => Promise<void>;
 }
 
-export const useWaterStore = create<WaterState>()(
-  persist(
-    (set) => ({
-      todayConsumed: 1500,
-      drinkCount: 3,
-      todayLogs: INITIAL_LOGS,
-      weeklyHistory: INITIAL_HISTORY,
+export const useWaterStore = create<WaterState>((set, get) => ({
+  todayConsumed: 0,
+  drinkCount: 0,
+  todayLogs: [],
+  isLoaded: false,
 
-      addWater: (amountMl: number) => {
-        if (!amountMl || amountMl <= 0 || isNaN(amountMl)) {
-          return { success: false, error: 'Amount must be greater than 0 ml' };
-        }
+  currentStreak: 0,
+  longestStreak: 0,
+  weeklyAverage: 0,
+  bestDay: null,
+  weeklyChartDays: [],
+  historyRecords: [],
 
-        const validAmount = Math.round(amountMl);
-        const newLog: WaterLog = {
-          id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-          amountMl: validAmount,
-          timestamp: Date.now(),
-          dateKey: getTodayDateKey(),
-        };
+  loadTodayData: async (dailyGoal: number = 2500) => {
+    try {
+      const todayKey = getTodayDateKey();
+      const summary = await getTodaySummaryFromDb(todayKey, dailyGoal);
 
-        set((state) => {
-          const updatedConsumed = state.todayConsumed + validAmount;
-          const updatedLogs = [newLog, ...state.todayLogs];
-          const updatedCount = state.drinkCount + 1;
+      set({
+        todayConsumed: summary.consumedMl,
+        drinkCount: summary.drinkCount,
+        todayLogs: summary.logs,
+        isLoaded: true,
+      });
 
-          // Also keep "Today" item in weeklyHistory synchronized
-          const updatedHistory = state.weeklyHistory.map((item) => {
-            if (item.dayLabel === 'Today') {
-              const goal = item.goalMl > 0 ? item.goalMl : 2500;
-              return {
-                ...item,
-                consumedMl: updatedConsumed,
-                percentage: Math.round((updatedConsumed / goal) * 100),
-              };
-            }
-            return item;
-          });
-
-          return {
-            todayConsumed: updatedConsumed,
-            drinkCount: updatedCount,
-            todayLogs: updatedLogs,
-            weeklyHistory: updatedHistory,
-          };
-        });
-
-        return { success: true };
-      },
-
-      removeWaterLog: (id: string) => {
-        set((state) => {
-          const target = state.todayLogs.find((l) => l.id === id);
-          if (!target) return state;
-
-          const updatedConsumed = Math.max(0, state.todayConsumed - target.amountMl);
-          const updatedLogs = state.todayLogs.filter((l) => l.id !== id);
-          const updatedCount = Math.max(0, state.drinkCount - 1);
-
-          const updatedHistory = state.weeklyHistory.map((item) => {
-            if (item.dayLabel === 'Today') {
-              const goal = item.goalMl > 0 ? item.goalMl : 2500;
-              return {
-                ...item,
-                consumedMl: updatedConsumed,
-                percentage: Math.round((updatedConsumed / goal) * 100),
-              };
-            }
-            return item;
-          });
-
-          return {
-            todayConsumed: updatedConsumed,
-            drinkCount: updatedCount,
-            todayLogs: updatedLogs,
-            weeklyHistory: updatedHistory,
-          };
-        });
-      },
-
-      clearTodayData: () =>
-        set((state) => ({
-          todayConsumed: 0,
-          drinkCount: 0,
-          todayLogs: [],
-          weeklyHistory: state.weeklyHistory.map((item) =>
-            item.dayLabel === 'Today'
-              ? { ...item, consumedMl: 0, percentage: 0 }
-              : item
-          ),
-        })),
-
-      clearHistory: () =>
-        set((state) => ({
-          weeklyHistory: state.weeklyHistory.filter((item) => item.dayLabel === 'Today'),
-        })),
-
-      resetWaterStore: () =>
-        set({
-          todayConsumed: 0,
-          drinkCount: 0,
-          todayLogs: [],
-          weeklyHistory: INITIAL_HISTORY.map((item) =>
-            item.dayLabel === 'Today' ? { ...item, consumedMl: 0, percentage: 0 } : item
-          ),
-        }),
-    }),
-    {
-      name: 'hydro-water-storage',
-      storage: createJSONStorage(() => AsyncStorage),
+      // Also refresh streaks
+      await get().loadAnalytics(dailyGoal, 7);
+    } catch (error) {
+      console.error('[WaterStore] Failed to load today data:', error);
+      set({ isLoaded: true });
     }
-  )
-);
+  },
+
+  loadAnalytics: async (dailyGoal: number, filterDays: number = 7) => {
+    try {
+      const todayKey = getTodayDateKey();
+      const goal = dailyGoal > 0 ? dailyGoal : 2500;
+
+      // 1. Weekly chart (Monday through Sunday)
+      const weekInfos = getWeekDates(new Date());
+      const mondayKey = weekInfos[0].dateKey;
+      const sundayKey = weekInfos[6].dateKey;
+
+      const [weekTotals, filterDateTotals, allTotals] = await Promise.all([
+        getDailyTotalsRangeFromDb(mondayKey, sundayKey),
+        getDailyTotalsRangeFromDb(getLastNDaysDateKeys(filterDays)[0], todayKey),
+        getAllDailyTotalsFromDb(),
+      ]);
+
+      const weekMap = new Map<string, number>(weekTotals.map((t) => [t.dateKey, t.totalMl]));
+      const weeklyChartDays: DailyDataPoint[] = weekInfos.map((w) => {
+        const consumed = weekMap.get(w.dateKey) ?? 0;
+        return {
+          dateKey: w.dateKey,
+          dayLabel: w.dayLabel,
+          shortDay: w.shortDay,
+          consumedMl: consumed,
+          goalMl: goal,
+          percentage: Math.round((consumed / goal) * 100),
+          drinkCount: weekTotals.find((t) => t.dateKey === w.dateKey)?.drinkCount ?? 0,
+        };
+      });
+
+      // 2. Timeline history records (for selected filterDays e.g. 7 or 30 days, newest first)
+      const filterKeys = getLastNDaysDateKeys(filterDays).reverse();
+      const filterMap = new Map<string, { totalMl: number; count: number }>(
+        filterDateTotals.map((t) => [t.dateKey, { totalMl: t.totalMl, count: t.drinkCount }])
+      );
+
+      const historyRecords: DailyDataPoint[] = filterKeys.map((k) => {
+        const item = filterMap.get(k);
+        const consumed = item?.totalMl ?? 0;
+        return {
+          dateKey: k,
+          dayLabel: formatDateKeyToDisplay(k, todayKey),
+          shortDay: k.substring(5),
+          consumedMl: consumed,
+          goalMl: goal,
+          percentage: Math.round((consumed / goal) * 100),
+          drinkCount: item?.count ?? 0,
+        };
+      });
+
+      // 3. Analytics metrics
+      const weeklyAverage = calculateWeeklyAverage(weeklyChartDays.map((d) => ({ totalMl: d.consumedMl })), 7);
+      const bestDay = calculateBestDay(
+        weeklyChartDays.map((d) => ({ dateKey: d.dateKey, dayLabel: d.dayLabel, totalMl: d.consumedMl })),
+        goal
+      );
+
+      // 4. Streaks
+      const allDailyMap = new Map<string, number>(allTotals.map((t) => [t.dateKey, t.totalMl]));
+      // Ensure today's in-memory consumption is represented in map
+      allDailyMap.set(todayKey, get().todayConsumed);
+
+      const currentStreak = calculateCurrentStreak(allDailyMap, goal, todayKey);
+      const longestStreak = calculateLongestStreak(
+        allTotals.map((t) => (t.dateKey === todayKey ? { ...t, totalMl: get().todayConsumed } : t)),
+        goal
+      );
+
+      set({
+        weeklyChartDays,
+        historyRecords,
+        weeklyAverage,
+        bestDay,
+        currentStreak,
+        longestStreak: Math.max(longestStreak, currentStreak),
+      });
+    } catch (error) {
+      console.error('[WaterStore] Failed to load analytics:', error);
+    }
+  },
+
+  addWater: async (amountMl: number, dailyGoal: number = 2500) => {
+    if (!amountMl || amountMl <= 0 || isNaN(amountMl)) {
+      return { success: false, error: 'Amount must be greater than 0 ml' };
+    }
+
+    const validAmount = Math.round(amountMl);
+    const todayKey = getTodayDateKey();
+    const newLog: WaterLog = {
+      id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      amountMl: validAmount,
+      timestamp: Date.now(),
+      dateKey: todayKey,
+    };
+
+    // 1. Insert into SQLite
+    await insertWaterLogInDb(newLog);
+
+    // 2. Update local state
+    const newConsumed = get().todayConsumed + validAmount;
+    const newCount = get().drinkCount + 1;
+    const newLogs = [newLog, ...get().todayLogs];
+
+    set({
+      todayConsumed: newConsumed,
+      drinkCount: newCount,
+      todayLogs: newLogs,
+    });
+
+    // 3. Refresh analytics
+    await get().loadAnalytics(dailyGoal);
+
+    return { success: true };
+  },
+
+  removeWaterLog: async (id: string, dailyGoal: number = 2500) => {
+    const target = get().todayLogs.find((l) => l.id === id);
+
+    // 1. Delete from SQLite
+    await deleteWaterLogInDb(id);
+
+    // 2. Update local today state if it belonged to today
+    if (target) {
+      const updatedConsumed = Math.max(0, get().todayConsumed - target.amountMl);
+      const updatedLogs = get().todayLogs.filter((l) => l.id !== id);
+      const updatedCount = Math.max(0, get().drinkCount - 1);
+
+      set({
+        todayConsumed: updatedConsumed,
+        drinkCount: updatedCount,
+        todayLogs: updatedLogs,
+      });
+    }
+
+    // 3. Recompute analytics
+    await get().loadAnalytics(dailyGoal);
+  },
+
+  getLogsForSelectedDate: async (dateKey: string) => {
+    return await getWaterLogsForDateFromDb(dateKey);
+  },
+
+  clearTodayData: async () => {
+    const todayKey = getTodayDateKey();
+    await clearDateLogsInDb(todayKey);
+    set({
+      todayConsumed: 0,
+      drinkCount: 0,
+      todayLogs: [],
+    });
+    await get().loadAnalytics(2500);
+  },
+
+  clearHistory: async () => {
+    // Keeps today's data, clears older days
+    const todayKey = getTodayDateKey();
+    const all = await getAllDailyTotalsFromDb();
+    for (const row of all) {
+      if (row.dateKey !== todayKey) {
+        await clearDateLogsInDb(row.dateKey);
+      }
+    }
+    await get().loadAnalytics(2500);
+  },
+
+  resetWaterStore: async () => {
+    await clearAllWaterLogsInDb();
+    set({
+      todayConsumed: 0,
+      drinkCount: 0,
+      todayLogs: [],
+      currentStreak: 0,
+      longestStreak: 0,
+      weeklyAverage: 0,
+      bestDay: null,
+      weeklyChartDays: [],
+      historyRecords: [],
+    });
+  },
+}));

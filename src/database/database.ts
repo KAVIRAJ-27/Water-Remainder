@@ -76,6 +76,7 @@ async function initDatabaseSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     );
 
     CREATE INDEX IF NOT EXISTS idx_water_logs_date ON water_logs(date_key);
+    CREATE INDEX IF NOT EXISTS idx_water_logs_date_ts ON water_logs(date_key, timestamp DESC);
     CREATE INDEX IF NOT EXISTS idx_reminders_enabled ON reminders(enabled);
   `);
 

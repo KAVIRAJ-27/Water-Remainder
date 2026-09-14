@@ -39,7 +39,13 @@ export default function SettingsScreen() {
   } = useUserStore();
 
   // Water store
-  const { clearTodayData, clearHistory, resetWaterStore } = useWaterStore();
+  const {
+    currentStreak,
+    longestStreak,
+    clearTodayData,
+    clearHistory,
+    resetWaterStore,
+  } = useWaterStore();
 
   // Reminder store
   const {
@@ -221,7 +227,34 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        {/* 2. REMINDERS SECTION */}
+        {/* 2. STREAKS & ACHIEVEMENTS */}
+        <View style={styles.sectionWrap}>
+          <Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>
+            STREAKS & ACHIEVEMENTS
+          </Text>
+          <View
+            style={[
+              styles.sectionCard,
+              { backgroundColor: colors.card, borderColor: colors.border },
+              Shadows.sm,
+            ]}
+          >
+            <SettingRow
+              icon="flame-outline"
+              title="Current Streak"
+              subtitle="Consecutive goal days"
+              valueText={`${currentStreak} ${currentStreak === 1 ? 'day' : 'days'} 🔥`}
+            />
+            <SettingRow
+              icon="trophy-outline"
+              title="Longest Streak"
+              subtitle="Personal best record"
+              valueText={`${longestStreak} ${longestStreak === 1 ? 'day' : 'days'} 🏆`}
+            />
+          </View>
+        </View>
+
+        {/* 3. REMINDERS SECTION */}
         <View style={styles.sectionWrap}>
           <Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>
             REMINDERS
